@@ -1,0 +1,165 @@
+<!DOCTYPE html>
+<html lang="es">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
+<title>SURVIVORS VS ZOMBIES 3D</title>
+<script src="https://cdn.tailwindcss.com"></script>
+<link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.4.0/css/all.min.css">
+<link href="https://fonts.googleapis.com/css2?family=Outfit:wght@300;400;600;800&display=swap" rel="stylesheet">
+<link rel="stylesheet" href="css/styles.css">
+<script src="https://cdnjs.cloudflare.com/ajax/libs/three.js/r128/three.min.js"></script>
+<script src="https://cdn.jsdelivr.net/npm/three@0.128.0/examples/js/controls/OrbitControls.js"></script>
+<script src="https://cdnjs.cloudflare.com/ajax/libs/tone/14.8.49/Tone.js"></script>
+</head>
+<body class="overflow-hidden">
+<div id="game-container" class="fixed inset-0"></div>
+
+<!-- HEADER -->
+<header id="hud-header" class="glass fixed top-0 left-0 right-0 z-40 hidden px-3 py-2 flex items-center justify-between gap-2">
+  <div class="flex items-center gap-3">
+    <button id="btn-left-toggle" class="hud-btn lg:hidden"><i class="fa-solid fa-bars"></i></button>
+    <div class="font-extrabold tracking-widest text-sm md:text-lg text-emerald-300"><i class="fa-solid fa-biohazard text-red-500"></i> SURVIVORS <span class="text-slate-300">VS</span> ZOMBIES 3D</div>
+    <div class="hidden md:flex items-center gap-2 text-xs">
+      <span id="hud-wave" class="badge">OLEADA 1</span>
+      <span id="hud-phase" class="badge badge-blue">BÚSQUEDA 3:00</span>
+      <span id="hud-zombies" class="badge badge-red"><i class="fa-solid fa-skull"></i> <b id="z-count">0</b></span>
+    </div>
+  </div>
+  <div class="flex items-center gap-1 md:gap-2">
+    <span id="hud-scrap" class="badge badge-amber" title="Escombro"><i class="fa-solid fa-cubes"></i> <b id="res-scrap">0</b>/1000</span>
+    <span id="hud-ammo" class="badge hidden sm:inline-block" title="Munición"><i class="fa-solid fa-box-open"></i> <b id="res-ammo">0</b></span>
+    <span id="hud-med" class="badge hidden sm:inline-block" title="Curas"><i class="fa-solid fa-kit-medical"></i> <b id="res-med">0</b></span>
+    <button id="btn-speed" class="hud-btn" title="Velocidad"><i class="fa-solid fa-gauge-high"></i> <span id="speed-label">1x</span></button>
+    <button id="btn-cam" class="hud-btn" title="Cámara"><i class="fa-solid fa-video"></i></button>
+    <button id="btn-wave-start" class="hud-btn hud-btn-red" title="Iniciar oleada"><i class="fa-solid fa-play"></i> <span class="hidden md:inline">OLEADA</span></button>
+    <button id="btn-right-toggle" class="hud-btn lg:hidden"><i class="fa-solid fa-users"></i></button>
+  </div>
+</header>
+<div id="hud-wave-mobile" class="glass fixed top-12 left-1/2 -translate-x-1/2 z-40 md:hidden text-xs px-3 py-1 rounded-full font-bold"><span id="hud-phase-m">BÚSQUEDA</span> · <span id="hud-wave-m">OLEADA 1</span></div>
+
+<!-- LEFT PANEL: apoyo + refugios + recursos + bitácora -->
+<aside id="panel-left" class="glass side-panel left-0">
+  <div class="panel-title"><i class="fa-solid fa-plane"></i> APOYO AÉREO <span class="text-[10px] opacity-60">CD 10s</span></div>
+  <div class="grid grid-cols-2 gap-1 p-2">
+    <button class="air-btn" data-air="missile" title="Helicóptero de ataque: misil en área"><i class="fa-solid fa-jet-fighter"></i><span>Misil</span><em class="cd">10s</em></button>
+    <button class="air-btn" data-air="supply" title="Avión suministro: rifle+granadas"><i class="fa-solid fa-parachute-box"></i><span>Suministro</span><em class="cd">10s</em></button>
+    <button class="air-btn" data-air="material" title="Avión materiales: 2x material"><i class="fa-solid fa-boxes-stacked"></i><span>Material</span><em class="cd">10s</em></button>
+    <button class="air-btn" data-air="heal" title="Apoyo médico: cura en área"><i class="fa-solid fa-heart-pulse"></i><span>Cura</span><em class="cd">10s</em></button>
+    <button class="air-btn" data-air="wall" title="Heli barricada: muro prefab"><i class="fa-solid fa-helicopter"></i><span>Muro</span><em class="cd">10s</em></button>
+  </div>
+  <div class="panel-title"><i class="fa-solid fa-house-shield"></i> REFUGIOS</div>
+  <div id="shelter-list" class="p-2 flex flex-col gap-1"></div>
+  <div class="panel-title"><i class="fa-solid fa-warehouse"></i> DEPÓSITO</div>
+  <div id="depot-list" class="p-2 text-[11px] grid grid-cols-2 gap-1">
+    <div><i class="fa-solid fa-cubes text-amber-400"></i> Escombro <b id="d-scrap">0</b></div>
+    <div><i class="fa-solid fa-box-open text-yellow-200"></i> Munición <b id="d-ammo">0</b></div>
+    <div><i class="fa-solid fa-kit-medical text-red-300"></i> Curas <b id="d-med">0</b></div>
+    <div><i class="fa-solid fa-drumstick-bite text-orange-300"></i> Comida <b id="d-food">0</b></div>
+    <div><i class="fa-solid fa-bomb text-slate-200"></i> Pesadas <b id="d-heavy">0</b></div>
+    <div><i class="fa-solid fa-shield-halved text-sky-300"></i> Blindaje <b id="d-armor">0</b></div>
+  </div>
+  <div class="panel-title"><i class="fa-solid fa-terminal"></i> BITÁCORA IA</div>
+  <div id="game-log" class="log-box"></div>
+</aside>
+
+<!-- RIGHT PANEL: equipo -->
+<aside id="panel-right" class="glass side-panel right-0">
+  <div class="panel-title"><i class="fa-solid fa-users"></i> EQUIPO <span id="kills" class="ml-auto text-[10px]">Bajas: 0</span></div>
+  <div id="team-list" class="p-2 flex flex-col gap-1"></div>
+  <div class="panel-title"><i class="fa-solid fa-user-astronaut"></i> INSPECTOR <span class="text-[10px] opacity-60">click ficha</span></div>
+  <div id="inspector" class="p-2 text-[11px]">Selecciona un superviviente…</div>
+  <div id="player-bars" class="p-2 hidden">
+    <div class="bar"><div id="bar-hp"></div><span>HP</span></div>
+    <div class="bar energy"><div id="bar-en"></div><span>EN</span></div>
+    <div class="bar ammo"><div id="bar-am"></div><span id="ammo-label">AMMO</span></div>
+    <div class="flex gap-1 mt-1 text-[10px]">
+      <span class="badge">E: recoger</span><span class="badge">Q: granada</span><span class="badge">F: curar</span>
+    </div>
+  </div>
+  <div id="toast-box" class="p-2"></div>
+</aside>
+
+<!-- CENTER: mira + ayuda + banners -->
+<div id="crosshair" class="hidden"><div class="dot"></div><div class="ring"></div></div>
+<div id="hitmarker" class="hidden">✕</div>
+<div id="help-center" class="glass hidden fixed top-1/2 left-1/2 -translate-x-1/2 -translate-y-1/2 z-40 p-3 text-xs max-w-[92vw]"></div>
+<div id="air-banner" class="hidden">✈ <span id="air-banner-text"></span></div>
+<div id="build-progress-box" class="fixed bottom-16 left-1/2 -translate-x-1/2 z-40 flex flex-col gap-1 items-center"></div>
+<div id="rotate-warning" class="hidden">🔄 Gira el dispositivo a horizontal</div>
+
+<!-- MENUS B/G/I/O -->
+<div id="menu-build" class="glass modal hidden">
+  <h2><i class="fa-solid fa-hammer"></i> CONSTRUCCIÓN <span class="text-[10px] opacity-60">[B] cerrar · [X] aportar</span></h2>
+  <div id="build-list" class="grid grid-cols-1 md:grid-cols-2 gap-1 p-2 max-h-[50vh] overflow-y-auto"></div>
+  <div class="p-2 flex gap-2"><button id="btn-call-help" class="hud-btn flex-1"><i class="fa-solid fa-handshake-angle"></i> Llamar NPCs a mi obra</button><button id="btn-close-build" class="hud-btn">Cerrar</button></div>
+</div>
+<div id="menu-weapons" class="glass modal hidden">
+  <h2><i class="fa-solid fa-gun"></i> ARSENAL [G]</h2>
+  <div id="weapon-list" class="p-2 flex flex-col gap-1 max-h-[50vh] overflow-y-auto"></div>
+  <div class="p-2"><button id="btn-close-weapons" class="hud-btn w-full">Cerrar</button></div>
+</div>
+<div id="menu-inv" class="glass modal hidden">
+  <h2><i class="fa-solid fa-backpack"></i> INVENTARIO [I]</h2>
+  <div id="inv-body" class="p-3 text-xs"></div>
+  <div class="p-2 flex gap-2"><button id="btn-use-med" class="hud-btn flex-1"><i class="fa-solid fa-kit-medical"></i> Usarme botiquín (+50)</button><button id="btn-drop-crate" class="hud-btn flex-1"><i class="fa-solid fa-trash"></i> Soltar caja</button><button id="btn-close-inv" class="hud-btn">X</button></div>
+</div>
+<div id="menu-design" class="glass modal hidden">
+  <h2><i class="fa-solid fa-drafting-compass"></i> DISEÑADOR DE BASE [O] <span id="design-outpost" class="text-[10px]"></span></h2>
+  <div id="design-list" class="grid grid-cols-1 md:grid-cols-2 gap-1 p-2 max-h-[50vh] overflow-y-auto"></div>
+  <div class="p-2"><button id="btn-close-design" class="hud-btn w-full">Cerrar</button></div>
+</div>
+
+<!-- TOUCH -->
+<div id="touch-ui" class="hidden">
+  <div id="joystick"><div id="stick"></div></div>
+  <div id="touch-btns">
+    <button data-t="fire">🔥</button><button data-t="ads">🎯</button><button data-t="nade">💣</button>
+    <button data-t="use">E</button><button data-t="build">B</button><button data-t="heal">F</button>
+    <button data-t="tower">🗼</button><button data-t="hammer">X</button><button data-t="inv">🎒</button>
+    <button data-t="rally">T</button>
+  </div>
+</div>
+
+<!-- MAIN MENU -->
+<div id="main-menu" class="fixed inset-0 z-50 flex items-center justify-center p-3">
+  <div class="glass max-w-2xl w-full p-5 md:p-8 text-center max-h-[94vh] overflow-y-auto">
+    <h1 class="text-2xl md:text-4xl font-extrabold tracking-widest text-emerald-300">SURVIVORS <span class="text-slate-200">VS</span> <span class="text-red-500">ZOMBIES 3D</span></h1>
+    <p class="text-xs md:text-sm opacity-70 mt-1">Shooter táctico CoD × Tower Defense · Three.js + IA autónoma</p>
+    <div class="grid md:grid-cols-3 gap-2 mt-4 text-left text-xs">
+      <div><div class="panel-title">1 · PLATAFORMA</div><div class="flex gap-1 p-2"><button class="plat-btn hud-btn flex-1 font-bold" data-plat="pc">🖥 PC</button><button class="plat-btn hud-btn flex-1" data-plat="mobile">📱 Móvil</button></div></div>
+      <div><div class="panel-title">2 · MODO</div><div class="flex flex-col gap-1 p-2"><button class="mode-btn hud-btn font-bold" data-mode="spectator">👁 Espectador (IA sola)</button><button class="mode-btn hud-btn" data-mode="participant">🎮 Participante (6º)</button><button class="mode-btn hud-btn" data-mode="custom">⚙ Custom</button></div></div>
+      <div><div class="panel-title">3 · VISTA</div><div class="flex gap-1 p-2"><button class="view-btn hud-btn flex-1 font-bold" data-view="fps">1ª pers.</button><button class="view-btn hud-btn flex-1" data-view="tps">3ª pers.</button></div></div>
+    </div>
+    <div id="custom-box" class="hidden grid md:grid-cols-3 gap-2 mt-2 text-xs text-left">
+      <div><div class="panel-title">Zombies</div><div class="flex gap-1 p-2"><button class="cbtn hud-btn flex-1" data-k="zombieMult" data-v="0.5">0.5x</button><button class="cbtn hud-btn flex-1 font-bold" data-k="zombieMult" data-v="1">1x</button><button class="cbtn hud-btn flex-1" data-k="zombieMult" data-v="2">2x</button></div></div>
+      <div><div class="panel-title">Recursos</div><div class="flex gap-1 p-2"><button class="cbtn hud-btn flex-1" data-k="startRes" data-v="0">0</button><button class="cbtn hud-btn flex-1 font-bold" data-k="startRes" data-v="2">2</button><button class="cbtn hud-btn flex-1" data-k="startRes" data-v="6">6</button></div></div>
+      <div><div class="panel-title">Preparación</div><div class="flex gap-1 p-2"><button class="cbtn hud-btn flex-1" data-k="prepTime" data-v="60">1:00</button><button class="cbtn hud-btn flex-1 font-bold" data-k="prepTime" data-v="180">3:00</button><button class="cbtn hud-btn flex-1" data-k="prepTime" data-v="300">5:00</button></div></div>
+    </div>
+    <div class="text-[11px] opacity-70 mt-2 text-left">WASD moverse · Shift sprint · Click disparar · ClickD apuntar (ADS) · Q granada · F curar · E recoger · B construir · G armas · I inventario · O diseñador · T reagrupar · X martillo · Z torre · V cámara</div>
+    <button id="btn-play" class="mt-3 text-lg font-extrabold px-10 py-3 rounded-xl bg-emerald-500 hover:bg-emerald-400 text-black tracking-widest"><i class="fa-solid fa-play"></i> JUGAR</button>
+  </div>
+</div>
+
+<!-- GAME OVER -->
+<div id="gameover" class="hidden fixed inset-0 z-50 flex items-center justify-center p-3">
+  <div class="glass max-w-md w-full p-6 text-center">
+    <h2 class="text-3xl font-extrabold text-red-500">💀 GAME OVER</h2>
+    <p id="go-stats" class="text-xs mt-2"></p>
+    <div class="flex gap-2 mt-4"><button id="btn-retry" class="hud-btn flex-1 font-bold">🔄 Reintentar desde 0</button><button id="btn-rescue" class="hud-btn flex-1 font-bold">🚁 Rescate</button></div>
+  </div>
+</div>
+
+<script src="js/config.js"></script>
+<script src="js/audio.js"></script>
+<script src="js/map.js"></script>
+<script src="js/entities.js"></script>
+<script src="js/ai.js"></script>
+<script src="js/air-support.js"></script>
+<script src="js/combat.js"></script>
+<script src="js/ui.js"></script>
+<script src="js/player.js"></script>
+<script src="js/outpost.js"></script>
+<script src="js/main.js"></script>
+</body>
+</html>

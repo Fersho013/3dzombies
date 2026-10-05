@@ -30,6 +30,7 @@ function init3DWorld() {
   spawnInitialCrates(14);
   initSurvivors(false);
   activateShelter('MALL');
+  if (typeof buildCodEconomy === 'function') buildCodEconomy();
   startWaveTimer();
   setupPlayerControls();
   setupUICallbacks();
@@ -54,6 +55,7 @@ function stepGame(dt) {
   safeStep('projectiles', updateProjectiles, dt);
   safeStep('air', function (d) { updateAirUnits(d); updateMissiles(d); updateGrenades(d); updateLoots(d); updateHealFX(d); updateTowerTurrets(d); updateTank(d); }, dt);
   safeStep('outpost', updateOutpostSystems, dt);
+  safeStep('fx', function (d) { updateSparks(d); updateStreetLife(d); applyShake(d); }, dt);
   safeStep('camera', updateCamera, dt);
   safeStep('ui', updateUI, dt);
 }

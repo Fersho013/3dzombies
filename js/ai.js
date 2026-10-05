@@ -23,24 +23,39 @@ function triggerWave() {
     }
   }
   push('crawler', nCraw); push('brute', nMed); push('titan', nTit);
+  // ronda especial CoD cada 5 oleadas: sabuesos rápidos
+  if (currentWave >= 5 && currentWave % 5 === 0) {
+    var nH = 6 + currentWave * 2;
+    push('hound', nH);
+    log('🐺 ¡RONDA DE SABUESOS! ' + nH);
+    toast('🐺 Ronda de sabuesos');
+  }
   // shuffle
   spawnQueue.sort(function () { return Math.random() - 0.5; });
   spawnTimer = 0;
   log('🌊 OLEADA ' + currentWave + ': ' + n + ' zombies (' + nCraw + 'R/' + nMed + 'C/' + nTit + 'T)');
   if (gameMode === 'participant' && playerIndex >= 0) lockPointer();
 }
+ZOMBIE_TYPES.hound = ZOMBIE_TYPES.hound || { name: 'Sabueso', hpMul: 0.7, spdMul: 2.1, dmgMul: 0.9, scale: 0.7, color: 0xdc2626 };
+var powerTimers = { insta: 0, doublePts: 0 };
+var powerups = [];
 function spawnZombie(kind, x, z) {
   var T = ZOMBIE_TYPES[kind];
-  var mesh = createHumanoid(0xffffff, true, kind);
-  mesh.position.set(x, 0, z); scene.add(mesh);
+  var mesh = createHumanoid(0xffffff, true, kind === 'hound' ? 'crawler' : kind);
+  // salir del suelo estilo CoD: nace hundido + tierra
+  mesh.position.set(x, kind === 'hound' ? 0 : -1.7, z); scene.add(mesh);
+  if (kind !== 'hound' && typeof spawnImpactFX === 'function') spawnImpactFX({ x: x, z: z }, 0x57534e);
   var baseHp = 40 + currentWave * 6;
+  // velocidad CoD: andan oleadas 1-4, corren 5+, sprint 8+; sabuesos siempre sprint
+  var roundBoost = 1 + Math.min(0.9, currentWave * 0.06);
+  var houndBoost = kind === 'hound' ? 1.35 : 1;
   zombies.push({
     kind: kind, mesh: mesh, hp: baseHp * T.hpMul, maxHp: baseHp * T.hpMul,
-    speed: (0.085 + Math.random() * 0.035) * T.spdMul * 60 * 0.16,
+    speed: (0.085 + Math.random() * 0.035) * T.spdMul * 60 * 0.16 * roundBoost * houndBoost,
     dmg: (5 + currentWave * 0.7) * T.dmgMul,
-    atkCd: 0, alive: true, growlCd: rand(4, 12)
+    atkCd: 0, alive: true, growlCd: rand(4, 12), rise: kind === 'hound' ? 0 : 1.1, lungeCd: 0
   });
-  if (Math.random() < 0.12) playSound('zombie');
+  if (Math.random() < 0.2) playSound('zombie');
 }
 function updateSpawns(dt) {
   if (!isWaveActive || !spawnQueue.length) return;
@@ -64,6 +79,7 @@ function nearestAliveAlly(s, maxD) {
 // ---- IA SUPERVIVIENTES TÁCTICA Warzone: ráfagas, focus, cobertura, reanimar ----
 function updateSurvivorAI(s, dt) {
   if (!s.alive || s.isPlayer || s.towerOp) return;
+  if (typeof updateInsideMemory === 'function') updateInsideMemory(s);
   if (s.downed) { // desangrándose 30s
     s.reviveT -= dt * gameSpeed;
     if (Math.floor(s.reviveT) % 5 === 0 && Math.random() < dt) setThought(s, '¡Ayuda! ' + Math.ceil(s.reviveT) + 's');
@@ -145,17 +161,25 @@ function updateSurvivorAI(s, dt) {
     }
     return;
   }
-  // TRANSPORTAR / RECOGER cajas (fase búsqueda)
+  // TRANSPORTAR / RECOGER cajas (fase búsqueda): llena hasta 3/3 pasando por puertas
   if (!isWaveActive) {
-    if (s.carriedCrate) {
+    var n = crateCount(s);
+    if (n >= 3 || (s.carriedCrates.length && !nearestCrate(pos, 40))) {
       var c0 = shelterCentroid();
       if (dist2D(pos, c0) < 8) { deliverCrate(s); }
-      else moveToward(s, { x: c0.x, z: c0.z }, dt, 1.0);
+      else navigateWithDoors(s, { x: c0.x, z: c0.z }, dt, 1.0);
       return;
     }
     var crate = nearestCrate(pos, 80);
-    if (crate) { moveToward(s, crate.pos, dt, 1.0, 1.6); faceToward(s, crate.pos); if (dist2D(pos, crate.pos) < 1.8) pickupCrate(s, crate); return; }
-    // construir / reparar
+    if (crate) {
+      var rr = navigateWithDoors(s, crate.pos, dt, 1.6);
+      faceToward(s, crate.pos);
+      if (dist2D(pos, crate.pos) < 1.9) { pickupCrate(s, crate); }
+      if (rr === 'stuck') { s.targetCrate = null; }
+      return;
+    }
+    // construir / reparar / comprar CoD (exploración con propósito)
+    if (typeof npcCodShopping === 'function' && npcCodShopping(s, dt)) return;
     if (helpConstruction(s, dt)) return;
     if (repairNearby(s, dt)) return;
     maybeExpandShelters(s);
@@ -293,21 +317,31 @@ function nearestCrate(pos, maxD) {
   crates.forEach(function (c) { if (c.taken) return; var d = dist2D(pos, c.pos); if (d < bd) { bd = d; best = c; } });
   return best;
 }
+function crateCount(s) { s.carriedCrates = s.carriedCrates || (s.carriedCrate ? [s.carriedCrate] : []); return s.carriedCrates.length; }
 function pickupCrate(s, crate) {
+  s.carriedCrates = s.carriedCrates || (s.carriedCrate ? [s.carriedCrate] : []);
+  if (s.carriedCrates.length >= 3) { if (s.isPlayer) toast('🎒 Lleno 3/3 — entrega en depósito'); return false; }
   crate.taken = true; scene.remove(crate.mesh);
   crates.splice(crates.indexOf(crate), 1);
-  s.carriedCrate = crate.kind;
-  // mochila visible
+  s.carriedCrates.push(crate.kind);
+  s.carriedCrate = s.carriedCrates[0];
+  // mochila visible (crece con la carga)
   if (!s.pack) { var p = new THREE.Mesh(new THREE.BoxGeometry(0.4, 0.5, 0.2), mat(0xf59e0b)); p.position.set(0, 1.3, -0.28); s.mesh.add(p); s.pack = p; }
-  setThought(s, '📦 ' + crate.kind);
+  if (s.pack) s.pack.scale.set(1, 1 + s.carriedCrates.length * 0.35, 1);
+  setThought(s, '📦 ' + crate.kind + ' (' + s.carriedCrates.length + '/3)');
   playSound('pickup');
   STATS.cratesPicked++;
+  return true;
 }
 function deliverCrate(s) {
-  var k = s.carriedCrate; s.carriedCrate = null;
+  s.carriedCrates = s.carriedCrates || (s.carriedCrate ? [s.carriedCrate] : []);
+  if (!s.carriedCrates.length) return;
+  var list = s.carriedCrates.slice();
+  s.carriedCrates = []; s.carriedCrate = null;
   if (s.pack) { s.mesh.remove(s.pack); s.pack = null; }
-  applyCrateReward(k);
-  setThought(s, 'entregado ✓');
+  list.forEach(function (k) { applyCrateReward(k, s); });
+  setThought(s, 'entregado ' + list.length + '/3 ✓');
+  if (s.isPlayer) toast('📦 Entregadas ' + list.length + '/3');
 }
 function applyCrateReward(k) {
   // TODO con propósito temático (nada es decorativo):
@@ -334,15 +368,18 @@ function helpConstruction(s, dt) {
   // buscar obra activa (torre andamio o outpost work)
   var job = (window._buildJobs || []).find(function (j) { return !j.done; });
   if (!job) return false;
-  moveToward(s, job.pos, dt, 1.0, 2.5);
+  navigateWithDoors(s, job.pos, dt, 2.5);
   if (dist2D(s.mesh.position, job.pos) < 3) { job.work -= dt * gameSpeed; setThought(s, '🔨 ' + Math.ceil(job.work) + 's'); }
   return true;
 }
 function repairNearby(s, dt) {
   for (var i = 0; i < walls.length; i++) {
     var wl = walls[i]; if (wl.hp < wl.maxHp && dist2D(s.mesh.position, wl.mesh.position) < 6) {
-      if (dist2D(s.mesh.position, wl.mesh.position) > 2.5) moveToward(s, wl.mesh.position, dt, 1.0, 2.2);
-      else { wl.hp = Math.min(wl.maxHp, wl.hp + 20 * dt * gameSpeed); setThought(s, '🔧 reparando'); }
+      if (dist2D(s.mesh.position, wl.mesh.position) > 2.5) navigateWithDoors(s, wl.mesh.position, dt, 2.2);
+      else {
+        wl.hp = Math.min(wl.maxHp, wl.hp + 20 * dt * gameSpeed); setThought(s, '🔧 reparando');
+        s._repT = (s._repT || 0) + dt; if (s._repT > 2 && typeof givePoints === 'function') { s._repT = 0; givePoints(s, 10, 'reparar'); }
+      }
       return true;
     }
   }
@@ -356,6 +393,45 @@ function repairNearby(s, dt) {
   }
   return false;
 }
+// NPC exploran economía CoD: si tienen puntos van a caja/pared (exploración garantizada)
+function npcCodShopping(s, dt) {
+  s.points = s.points || 0;
+  if (s.points < 750 || isWaveActive) return false;
+  // arma actual floja → buscar mejora
+  var weak = (s.weaponKey === 'pistol');
+  if (!weak && s.points < 950) return false;
+  var target = null, buy = null;
+  if (typeof mysteryBoxes !== 'undefined' && s.points >= 950) {
+    var bb = null, bd = 1e9;
+    mysteryBoxes.forEach(function (b) { var d = dist2D(s.mesh.position, { x: b.x, z: b.z }); if (d < bd) { bd = d; bb = b; } });
+    if (bb && bd < 60) { target = { x: bb.x, z: bb.z }; buy = 'box'; }
+  }
+  if (!target && typeof wallbuys !== 'undefined') {
+    var wb = null, wd = 1e9;
+    wallbuys.forEach(function (w) { var d = dist2D(s.mesh.position, { x: w.x, z: w.z }); if (d < wd) { wd = d; wb = w; } });
+    if (wb && wd < 50 && s.points >= wb.def.cost) { target = { x: wb.x, z: wb.z }; buy = wb; }
+  }
+  if (!target) return false;
+  s.state = 'SHOPPING';
+  navigateWithDoors(s, target, dt, 2.2);
+  if (dist2D(s.mesh.position, target) < 2.6) {
+    if (buy === 'box' && s.points >= 950) {
+      s.points -= 950;
+      var pool = ['rifle', 'smg', 'shotgun', 'sniper'];
+      var wk = pool[Math.floor(Math.random() * pool.length)];
+      s.slots = s.slots || [s.weaponKey]; if (s.slots.indexOf(wk) < 0) s.slots.push(wk);
+      s.weaponKey = wk; s.mag = WEAPONS[wk].mag;
+      if (s.gunMesh) { try { s.mesh.remove(s.gunMesh); } catch (e) {} }
+      s.gunMesh = createWeaponMesh(wk); s.gunMesh.position.set(0.36, 1.35, 0.45); s.mesh.add(s.gunMesh);
+      setThought(s, '📦 ¡' + WEAPONS[wk].name + '!');
+    } else if (buy && buy.def && s.points >= buy.def.cost) {
+      s.points -= buy.def.cost;
+      s.weaponKey = buy.def.weapon; s.mag = WEAPONS[buy.def.weapon].mag;
+      setThought(s, '🔫 ' + WEAPONS[buy.def.weapon].name);
+    }
+  }
+  return true;
+}
 var expandCd = 30;
 function maybeExpandShelters(s) {
   if (s.name !== 'Alex' && s.name !== 'Carlos') return;
@@ -367,11 +443,20 @@ function maybeExpandShelters(s) {
   activateShelter(free[0]);
   log('🧭 ' + s.name + ' fundó refugio ' + free[0]);
 }
-// ---- ZOMBIES ----
+// ---- ZOMBIES CoD: salen del suelo, embisten, sabuesos saltan ----
 function updateZombies(dt) {
+  if (typeof updatePowerups === 'function') updatePowerups(dt);
   for (var i = zombies.length - 1; i >= 0; i--) {
     var z = zombies[i]; if (!z.alive) continue;
-    z.atkCd -= dt * gameSpeed; z.growlCd -= dt * gameSpeed;
+    z.atkCd -= dt * gameSpeed; z.growlCd -= dt * gameSpeed; z.lungeCd = Math.max(0, (z.lungeCd || 0) - dt * gameSpeed);
+    // nacer del suelo: 1.1s vulnerable pero inmóvil
+    if (z.rise > 0) {
+      z.rise -= dt * gameSpeed;
+      z.mesh.position.y = -1.7 * Math.max(0, z.rise / 1.1);
+      if (z.rise <= 0) { z.mesh.position.y = 0; playSound('zombie'); }
+      animateEntityLimbs(z.mesh, dt, 0.3);
+      continue;
+    }
     if (z.growlCd <= 0) { z.growlCd = rand(8, 20); if (dist2D(z.mesh.position, shelterCentroid()) < 60) playSound('zombie'); }
     var tgt = zombieTarget(z);
     if (!tgt) continue;
@@ -398,6 +483,13 @@ function updateZombies(dt) {
         z.mesh.rotation.y = Math.atan2(dx, dz);
       }
       animateEntityLimbs(z.mesh, dt, z.speed);
+      // sabuesos: salto final 2.5m (embestida CoD)
+      if (z.kind === 'hound' && d < 4 && d > 1.6 && z.lungeCd <= 0) {
+        z.lungeCd = 2.5;
+        var lx = (tgt.pos.x - z.mesh.position.x) / (d || 1), lz = (tgt.pos.z - z.mesh.position.z) / (d || 1);
+        if (typeof tryMoveGround === 'function') tryMoveGround(z.mesh.position, lx * 2.2, lz * 2.2, 0.5);
+        playSound('zombie');
+      }
     } else if (z.atkCd <= 0) {
       z.atkCd = 1.1; z.mesh.rotation.y = Math.atan2(tgt.pos.x - z.mesh.position.x, tgt.pos.z - z.mesh.position.z);
       zombieAttack(z, tgt);
@@ -486,8 +578,14 @@ function removeStruct(ref, type) {
 }
 function damageZombie(z, dmg, killer) {
   if (!z.alive) return;
+  // headshot CoD (ADS preciso): 18% x2 + puntos extra
+  var headshot = false;
+  if (killer && killer.isPlayer && typeof playerInput !== 'undefined' && playerInput.ads && Math.random() < 0.18) { dmg *= 2; headshot = true; }
+  if (typeof powerTimers !== 'undefined' && powerTimers.insta > 0) dmg = 9999;
   z.hp -= dmg;
   showHitmarker();
+  if (headshot && killer && killer.isPlayer) toast('💀 HEADSHOT x2');
+  if (killer && typeof givePoints === 'function') givePoints(killer, headshot ? 15 : 10);
   playHitFlinch(z.mesh);
   spawnBlood(z.mesh.position, false);
   if (z.hp <= 0) {
@@ -500,9 +598,49 @@ function damageZombie(z, dmg, killer) {
     zombies.splice(zombies.indexOf(z), 1);
     STATS.kills++;
     if (killer) { killer.kills = (killer.kills || 0) + 1; if (killer.isPlayer) addShake(0.12); }
-    if (window.killfeed && Math.random() < 0.6) killfeed('☠ ' + (killer ? killer.name : 'Torreta') + ' → ' + ZOMBIE_TYPES[z.kind].name);
-    if (Math.random() < 0.22) spawnLoot(z.mesh.position);
+    // puntos CoD por tipo
+    if (killer && typeof givePoints === 'function') {
+      var pts = z.kind === 'titan' ? 150 : z.kind === 'brute' ? 100 : z.kind === 'hound' ? 80 : 60;
+      givePoints(killer, pts, (headshot ? 'HS ' : '') + ZOMBIE_TYPES[z.kind].name);
+    }
+    if (window.killfeed && Math.random() < 0.6) killfeed('☠ ' + (killer ? killer.name : 'Torreta') + ' → ' + ZOMBIE_TYPES[z.kind].name + (headshot ? ' 💀' : ''));
+    // drops CoD: 7% potenciador, si no 22% loot
+    if (Math.random() < 0.07 && typeof spawnPowerup === 'function') spawnPowerup(z.mesh.position);
+    else if (Math.random() < 0.22) spawnLoot(z.mesh.position);
     if (isWaveActive && !zombies.length && !spawnQueue.length) endWave();
+  }
+}
+// ===== POTENCIADORES CoD: munición máxima / muerte instantánea / doble puntos =====
+function spawnPowerup(pos) {
+  var kinds = ['maxammo', 'insta', 'double'];
+  var k = kinds[Math.floor(Math.random() * kinds.length)];
+  var col = k === 'maxammo' ? 0x4ade80 : k === 'insta' ? 0xef4444 : 0xfacc15;
+  var m = new THREE.Mesh(new THREE.OctahedronGeometry(0.5), new THREE.MeshBasicMaterial({ color: col }));
+  m.position.set(pos.x, 0.8, pos.z); scene.add(m);
+  powerups.push({ mesh: m, kind: k, life: 30 });
+  if (window.killfeed) killfeed('✨ Cayó ' + k);
+  playSound('heal');
+}
+function updatePowerups(dt) {
+  var edt = dt * Math.max(1, gameSpeed);
+  powerTimers.insta = Math.max(0, powerTimers.insta - edt);
+  powerTimers.doublePts = Math.max(0, powerTimers.doublePts - edt);
+  for (var i = powerups.length - 1; i >= 0; i--) {
+    var p = powerups[i]; p.life -= edt; p.mesh.rotation.y += edt * 3; p.mesh.position.y = 0.8 + Math.sin(performance.now() / 300) * 0.15;
+    var taken = false;
+    survivors.forEach(function (s) {
+      if (taken || !s.alive || s.downed) return;
+      if (dist2D(s.mesh.position, p.mesh.position) < 1.8) {
+        taken = true;
+        if (p.kind === 'maxammo') {
+          survivors.forEach(function (o) { if (o.alive) { var w = WEAPONS[o.weaponKey]; o.mag = w.mag; o.ammo = w.mag; } });
+          baseResources.ammo += 60; toast('💚 ¡MUNICIÓN MÁXIMA!'); bossBanner('💚 MUNICIÓN MÁXIMA');
+        } else if (p.kind === 'insta') { powerTimers.insta = 30; toast('💀 ¡MUERTE INSTANTÁNEA 30s!'); bossBanner('💀 INSTAKILL 30s'); }
+        else { powerTimers.doublePts = 30; toast('⭐ ¡DOBLE PUNTOS 30s!'); bossBanner('⭐ DOBLE PUNTOS 30s'); }
+        playSound('heal');
+      }
+    });
+    if (taken || p.life <= 0) { scene.remove(p.mesh); powerups.splice(i, 1); }
   }
 }
 // ---- torretas de refugio ----

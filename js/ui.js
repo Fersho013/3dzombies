@@ -169,7 +169,7 @@ function updateUI(dt) {
         (insideInterior && insideInterior(s.mesh.position) ? ' 🏠' + insideInterior(s.mesh.position).label : '') +
         '<br>HP ' + Math.ceil(s.hp) + ' · ⚡' + Math.ceil(s.energy) + ' · 🔫' + s.ammo + ' · 💣' + s.grenades + ' · ☠' + (s.kills || 0) +
         '<div class="hpbar"><i style="width:' + pct + '%"></i></div><div class="text-[10px] opacity-60">' + s.state + '</div>';
-      d.onclick = function () { playSound('ui'); selectedSurvivor = s; renderInspector(); cameraMode = 'follow'; cameraTargets.followIdx = idx; };
+      d.onclick = function () { playSound('ui'); selectedSurvivor = s; renderInspector(); if (gameMode !== 'participant') { cameraMode = 'follow'; cameraTargets.followIdx = idx; toast('👁 Siguiendo a ' + s.name + ' — arrastra para orbitar, rueda para zoom'); } else if (idx === playerIndex) { cameraMode = 'follow'; cameraTargets.followIdx = idx; } };
       tl.appendChild(d);
     });
     if (selectedSurvivor) renderInspector();
@@ -265,25 +265,36 @@ function cycleSpeed() {
 function cycleCamera() {
   var modes = gameMode === 'participant' ? ['follow', 'orbit', 'base'] : ['orbit', 'base', 'follow'];
   cameraMode = modes[(modes.indexOf(cameraMode) + 1) % modes.length];
-  toast('Cámara: ' + cameraMode); playSound('ui');
+  // al volver a follow en participante, volver al jugador (no quedarse en un NPC)
+  if (gameMode === 'participant' && cameraMode === 'follow') cameraTargets.followIdx = playerIndex;
+  toast('Cámara: ' + cameraMode + (cameraMode === 'follow' && cameraTargets.followIdx !== playerIndex ? ' (orbitable con ratón/rueda)' : '')); playSound('ui');
 }
 function updateCamera(dt) {
-  if (gameMode === 'participant' && playerIndex >= 0 && cameraMode === 'follow') return;
-  controls.enabled = cameraMode === 'orbit';
-  if (cameraMode === 'orbit') { controls.update(); return; }
+  // El jugador en follow lo maneja updatePlayer (FPS/TPS). Cualquier otro follow = orbitar NPC con cámara libre.
+  var followingPlayer = (gameMode === 'participant' && cameraMode === 'follow' && cameraTargets.followIdx === playerIndex && playerIndex >= 0);
+  if (followingPlayer) return;
+  if (cameraMode === 'orbit') { controls.enabled = true; controls.update(); return; }
   if (cameraMode === 'base') {
     if (!activeShelterKeys.length) return;
+    controls.enabled = false;
     var z = ZONES[activeShelterKeys[cameraTargets.baseIdx % activeShelterKeys.length]];
     var t = performance.now() / 1000 * 0.12;
     camera.position.lerp(new THREE.Vector3(z.pos[0] + Math.cos(t) * 40, 26, z.pos[2] + Math.sin(t) * 40), Math.min(1, dt * 1.5));
     camera.lookAt(z.pos[0], 2, z.pos[2]);
   } else {
+    // FOLLOW espectador / NPC: orbit libre alrededor del superviviente (como cámara libre CoD observer)
     var s = survivors[cameraTargets.followIdx % Math.max(1, survivors.length)];
-    if (s && s.alive) {
-      camera.position.lerp(new THREE.Vector3(s.mesh.position.x + 8, 7, s.mesh.position.z + 10), Math.min(1, dt * 3));
-      camera.lookAt(s.mesh.position.x, 1.5, s.mesh.position.z);
-      controls.target.set(s.mesh.position.x, 1.5, s.mesh.position.z);
+    if (!s) return;
+    controls.enabled = true;
+    // seguir al objetivo en movimiento sin teletransportar la cámara: desplazar target y cámara juntos
+    var dx = s.mesh.position.x - controls.target.x, dz = s.mesh.position.z - controls.target.z;
+    if (Math.abs(dx) > 0.01 || Math.abs(dz) > 0.01) {
+      var step = Math.min(1, dt * 4);
+      controls.target.x += dx * step; controls.target.z += dz * step;
+      camera.position.x += dx * step; camera.position.z += dz * step;
     }
+    controls.target.y = 1.5;
+    controls.update();
   }
 }
 function showGameOver() {

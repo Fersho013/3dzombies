@@ -44,6 +44,8 @@ html,body{margin:0;height:100%;background:#0a0e1a;color:#e2e8f0;overflow:hidden}
 #touch-btns{position:fixed;right:10px;bottom:20px;z-index:40;display:grid;grid-template-columns:repeat(3,52px);gap:6px}
 #touch-btns button{width:52px;height:52px;border-radius:99px;background:rgba(30,41,59,.8);border:1px solid #10b981;font-size:18px;color:#fff}
 #rotate-warning{position:fixed;inset:0;z-index:60;background:#0a0e1a;display:flex;align-items:center;justify-content:center;font-size:18px;font-weight:800}
+#rotate-warning.hidden{display:none!important}
+.hidden{display:none!important}
 #toast-box div{background:rgba(16,185,129,.9);color:#000;font-size:11px;font-weight:700;border-radius:8px;padding:4px 8px;margin-top:4px}
 .mode-btn.font-bold,.plat-btn.font-bold,.view-btn.font-bold,.cbtn.font-bold{outline:2px solid #10b981}
 body.mobile-mode .side-panel{transform:translateX(-110%)}

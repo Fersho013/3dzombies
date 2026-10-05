@@ -39,14 +39,52 @@ html,body{margin:0;height:100%;background:#0a0e1a;color:#e2e8f0;overflow:hidden}
 .bar.energy div{background:linear-gradient(90deg,#0ea5e9,#22d3ee)}
 .bar.ammo div{background:linear-gradient(90deg,#a78bfa,#f472b6)}
 .bar span{position:absolute;inset:0;font-size:9px;font-weight:800;display:flex;align-items:center;justify-content:center;color:#fff;text-shadow:0 1px 2px #000}
-#joystick{position:fixed;left:18px;bottom:24px;width:120px;height:120px;border-radius:99px;background:rgba(148,163,184,.15);border:2px solid rgba(148,163,184,.4);z-index:40;touch-action:none}
-#stick{position:absolute;left:35px;top:35px;width:50px;height:50px;border-radius:99px;background:rgba(16,185,129,.7)}
-#touch-btns{position:fixed;right:10px;bottom:20px;z-index:40;display:grid;grid-template-columns:repeat(3,52px);gap:6px}
-#touch-btns button{width:52px;height:52px;border-radius:99px;background:rgba(30,41,59,.8);border:1px solid #10b981;font-size:18px;color:#fff}
+#joystick{position:fixed;left:18px;bottom:24px;width:130px;height:130px;border-radius:99px;background:rgba(148,163,184,.12);border:2px solid rgba(148,163,184,.4);z-index:40;touch-action:none}
+#stick{position:absolute;left:40px;top:40px;width:50px;height:50px;border-radius:99px;background:rgba(16,185,129,.7)}
+#sprint-zone{position:absolute;top:-22px;left:0;right:0;text-align:center;font-size:9px;font-weight:800;color:#6ee7b7;opacity:.7}
+#touch-btns-codm{position:fixed;right:8px;bottom:14px;z-index:40;width:230px;height:210px;pointer-events:none}
+#touch-btns-codm button{position:absolute;pointer-events:auto;border-radius:99px;background:rgba(30,41,59,.82);border:1px solid #10b981;color:#fff;font-size:17px;display:flex;flex-direction:column;align-items:center;justify-content:center}
+#touch-btns-codm button em{font-style:normal;font-size:8px;font-weight:800}
+.codm-fire.hip{right:0;bottom:40px;width:86px!important;height:86px!important;font-size:30px!important;border-color:#ef4444!important}
+.codm-fire.ads{right:92px;bottom:8px;width:66px!important;height:66px!important;font-size:24px!important;border-color:#f59e0b!important}
+.codm-big{right:96px;bottom:80px;width:60px!important;height:60px!important;font-size:20px!important;border-color:#fff!important;background:rgba(16,185,129,.9)!important;color:#000!important}
+.codm-mini{width:46px!important;height:46px!important;font-size:16px!important}
+#touch-btns-codm [data-t="ads"]{right:170px;bottom:90px}
+#touch-btns-codm [data-t="jump"]{right:20px;bottom:132px}
+#touch-btns-codm [data-t="crouch"]{right:70px;bottom:140px}
+#touch-btns-codm [data-t="reload"]{right:150px;bottom:140px}
+#touch-btns-codm [data-t="nade"]{right:196px;bottom:140px}
+#touch-btns-codm [data-t="heal"]{right:10px;bottom:8px}
+#touch-btns-codm [data-t="knife"]{right:60px;bottom:80px}
+#touch-btns-codm [data-t="swap"]{right:150px;bottom:40px}
+#touch-btns-codm [data-t="armor"]{right:10px;bottom:60px}
+#touch-btns-codm [data-t="eat"]{right:60px;bottom:8px}
+#touch-btns-codm [data-t="build"]{right:110px;bottom:140px}
+#touch-btns-codm [data-t="tower"]{right:196px;bottom:40px}
+#look-area{position:fixed;left:0;top:0;right:0;bottom:0;z-index:15}
+body.mobile-mode #look-area{display:block}
 #rotate-warning{position:fixed;inset:0;z-index:60;background:#0a0e1a;display:flex;align-items:center;justify-content:center;font-size:18px;font-weight:800}
 #rotate-warning.hidden{display:none!important}
 .hidden{display:none!important}
 #toast-box div{background:rgba(16,185,129,.9);color:#000;font-size:11px;font-weight:700;border-radius:8px;padding:4px 8px;margin-top:4px}
+#damage-vignette{position:fixed;inset:0;z-index:34;pointer-events:none;opacity:0;background:radial-gradient(ellipse at center,transparent 45%,rgba(220,38,38,.65) 100%);transition:opacity .15s}
+#killfeed{position:fixed;top:56px;right:262px;z-index:40;display:flex;flex-direction:column;gap:3px;align-items:flex-end;pointer-events:none}
+#killfeed div{background:rgba(0,0,0,.7);border:1px solid rgba(239,68,68,.5);font-size:10px;padding:2px 8px;border-radius:8px;color:#fecaca}
+#boss-banner{position:fixed;top:96px;left:50%;transform:translateX(-50%);z-index:41;text-align:center;font-weight:900;font-size:20px;letter-spacing:.15em;color:#fff;text-shadow:0 2px 12px #ef4444,0 0 30px #000;background:rgba(127,29,29,.75);border:1px solid #ef4444;padding:8px 26px;border-radius:12px}
+#boss-bar{height:6px;background:#1f2937;border-radius:99px;margin-top:6px;overflow:hidden}#boss-bar i{display:block;height:100%;width:100%;background:linear-gradient(90deg,#ef4444,#f59e0b)}
+#interact-prompt{position:fixed;top:58%;left:50%;transform:translate(-50%,-50%);z-index:35;background:rgba(16,185,129,.95);color:#000;font-weight:900;border-radius:10px;padding:4px 12px;font-size:14px;border:2px solid #fff}
+#minimap{position:fixed;bottom:10px;right:262px;z-index:30;width:150px;height:150px;border-radius:12px;border:2px solid rgba(16,185,129,.6);background:rgba(10,15,30,.85)}
+#wave-progress{position:fixed;top:44px;left:50%;transform:translateX(-50%);z-index:30;width:min(420px,60vw);height:5px;background:rgba(30,41,59,.8);border-radius:99px;overflow:hidden}
+#compass{position:fixed;top:52px;left:50%;transform:translateX(-50%);z-index:29;width:min(480px,70vw);height:22px;background:rgba(10,15,30,.8);border:1px solid rgba(148,163,184,.3);border-radius:99px;overflow:hidden;font-size:10px;font-weight:800;color:#e2e8f0}
+#compass-strip{position:absolute;top:0;white-space:nowrap;line-height:20px;letter-spacing:6px}
+#compass-needle{position:absolute;left:50%;top:0;transform:translateX(-50%);color:#10b981;line-height:20px}
+#wave-progress i{display:block;height:100%;width:0;background:linear-gradient(90deg,#ef4444,#f59e0b)}
+.zbar{position:fixed;z-index:24;pointer-events:none;width:44px;height:5px;background:rgba(0,0,0,.7);border-radius:99px;overflow:hidden;transform:translate(-50%,-50%)}
+.zbar i{display:block;height:100%;background:linear-gradient(90deg,#ef4444,#f59e0b)}
+.zbar.titan{width:64px;height:7px;border:1px solid #ef4444}
+.bbar{position:fixed;z-index:24;pointer-events:none;width:52px;height:6px;background:rgba(0,0,0,.7);border:1px solid #38bdf8;border-radius:99px;overflow:hidden;transform:translate(-50%,-50%)}
+.bbar i{display:block;height:100%;background:#38bdf8}
+@media(max-width:1100px){#minimap{right:8px;bottom:170px;width:110px;height:110px}#killfeed{right:8px;top:120px}}
 .mode-btn.font-bold,.plat-btn.font-bold,.view-btn.font-bold,.cbtn.font-bold{outline:2px solid #10b981}
 body.mobile-mode .side-panel{transform:translateX(-110%)}
 body.mobile-mode #panel-right{transform:translateX(110%)}

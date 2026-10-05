@@ -101,7 +101,9 @@ function updateMissiles(dt) {
 function dropWall(x, z) {
   var m = new THREE.Mesh(new THREE.BoxGeometry(4, 2.5, 0.6), new THREE.MeshStandardMaterial({ color: 0x64748b, roughness: 0.8 }));
   m.position.set(x, 1.25, z); m.castShadow = true; scene.add(m);
-  walls.push({ mesh: m, hp: 300, maxHp: 300 });
+  var wl = { mesh: m, hp: 300, maxHp: 300 };
+  walls.push(wl);
+  if (typeof addDynamicSolid === 'function') addDynamicSolid(wl, x, z, 4, 0.7);
   log('🧱 Muro desplegado');
 }
 function buildDummyAt(pos) {

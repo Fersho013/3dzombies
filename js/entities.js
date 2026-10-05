@@ -91,7 +91,9 @@ function initSurvivors(withPlayer) {
   NPC_DEFS.forEach(function (d, i) {
     var mesh = createHumanoid(d.color, false);
     var a = (i / 5) * Math.PI * 2;
-    mesh.position.set(Math.cos(a) * 4, 0, Math.sin(a) * 4 - 4);
+    // spawn al sur del MALL (fuera de muros): plaza de refugio, no dentro de sólidos
+    mesh.position.set(Math.cos(a) * 5, 0, 4 + Math.sin(a) * 4);
+    if (typeof resolveCircle === 'function') resolveCircle(mesh.position, 0.6);
     scene.add(mesh);
     var gun = createWeaponMesh(d.weapon); gun.position.set(0.36, 1.35, 0.45); gun.rotation.y = 0; mesh.add(gun);
     survivors.push({ name: d.name, role: d.role, weaponKey: d.weapon, color: d.color, mesh: mesh, gunMesh: gun, hp: 100, maxHp: 100, energy: 100, ammo: 60, grenades: 2, meds: 1, armor: 0, alive: true, isPlayer: false, state: 'SCAVENGE', cd: 0, nadeCd: 0, healCd: 0, targetCrate: null, carriedCrate: null, buildHelp: 0, towerOp: null, kills: 0, healRate: d.healRate, bazooka: !!d.bazooka, stepT: 0 });
@@ -100,7 +102,8 @@ function initSurvivors(withPlayer) {
 }
 function spawnPlayerSurvivor() {
   var mesh = createHumanoid(0x10b981, false);
-  mesh.position.set(3, 0, 6); scene.add(mesh);
+  mesh.position.set(3, 0, 8); scene.add(mesh);
+  if (typeof resolveCircle === 'function') resolveCircle(mesh.position, 0.6);
   var gun = createWeaponMesh('rifle'); gun.position.set(0.36, 1.35, 0.45); mesh.add(gun);
   playerIndex = survivors.length;
   survivors.push({ name: 'Tú', role: 'Participante', weaponKey: 'rifle', color: 0x10b981, mesh: mesh, gunMesh: gun, hp: 100, maxHp: 100, energy: 100, ammo: 90, grenades: 3, meds: 2, armor: 0, alive: true, isPlayer: true, state: 'PLAYER', cd: 0, nadeCd: 0, healCd: 0, targetCrate: null, carriedCrate: null, buildHelp: 0, towerOp: null, kills: 0, healRate: 25, yaw: 0, pitch: 0, ads: 0, stepT: 0, reloadT: 0 });
@@ -116,6 +119,7 @@ function createDepot(zoneKey) {
   var lampM = new THREE.Mesh(new THREE.SphereGeometry(0.18), new THREE.MeshBasicMaterial({ color: 0x4ade80 })); lampM.position.set(0, 3.1, 2.05); g.add(lampM);
   g.position.set(z.pos[0] + 6, 0, z.pos[2] + 6); scene.add(g);
   z.depot = { mesh: g, hp: 6000, maxHp: 6000, lamp: lampM };
+  if (typeof addDynamicSolid === 'function') addDynamicSolid(z.depot, g.position.x, g.position.z, 4.2, 4.2);
 }
 function createShelterTurret(zoneKey, improvised) {
   var z = ZONES[zoneKey];

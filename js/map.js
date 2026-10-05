@@ -61,26 +61,102 @@ function buildZoneMall() {
   // puerta accesible del mall: interior con loot
   makeInterior([0, 0, -3], 12, 8, 'MALL');
 }
+function nearestDoor(pos, maxD) {
+  var best = null, bd = maxD || 3;
+  for (var i = 0; i < doors.length; i++) { var d = doors[i]; var dd = dist2D(pos, d.mesh.position); if (dd < bd) { bd = dd; best = d; } }
+  return best;
+}
+function toggleDoor(d) {
+  d.open = !d.open;
+  try {
+    d.mesh.rotation.y = d.open ? Math.PI / 1.6 : 0;
+    d.mesh.position.x = d.closedX + (d.open ? 0.55 : 0);
+  } catch (e) {}
+  playSound('ui'); toast((d.open ? '🚪 Abierta: ' : '🚪 Cerrada: ') + d.label);
+  log('🚪 Puerta ' + d.label + (d.open ? ' abierta' : ' cerrada'));
+}
 function buildZoneHouses() {
   var p = ZONES.HOUSES.pos;
-  var cols = [0x78350f, 0x365314, 0x44403c, 0x134e4a, 0x4c1d95];
-  for (var i = 0; i < 5; i++) {
-    (function (i) {
-      var hx = p[0] + (i % 3) * 15 - 15, hz = p[2] + Math.floor(i / 3) * 13 - 6;
-      var facade = new THREE.MeshStandardMaterial({ map: TEX.facade, roughness: 0.9, color: cols[i] });
-      var h = new THREE.Mesh(new THREE.BoxGeometry(8, 5, 7), facade);
-      h.position.set(hx, 2.5, hz); h.castShadow = h.receiveShadow = true; scene.add(h);
-      var roof = new THREE.Mesh(new THREE.ConeGeometry(6, 2, 4), new THREE.MeshStandardMaterial({ color: 0x7f1d1d }));
-      roof.position.set(hx, 6, hz); roof.rotation.y = Math.PI / 4; roof.castShadow = true; scene.add(roof);
-      // puerta: hueco + luz interior cálida
-      var door = new THREE.Mesh(new THREE.PlaneGeometry(1.4, 2.4), new THREE.MeshBasicMaterial({ color: 0xfde68a }));
-      door.position.set(hx, 1.2, hz + 3.53); scene.add(door);
-      var li = new THREE.PointLight(0xfde68a, 0.7, 12); li.position.set(hx, 2, hz + 2); scene.add(li);
-      var H = { mesh: h, roof: roof, hp: 600, maxHp: 600, name: 'Casa ' + (i + 1), onDestroy: function (pp) { collapseRubble(pp, cols[i], 5); scene.remove(roof); } };
-      destructibles.push(H);
-      makeInterior([hx, 0, hz], 6.5, 5.5, 'Casa ' + (i + 1));
-    })(i);
-  }
+  var styles = [
+    { wall: 0xb45309, roof: 0x7f1d1d, floor: 0x92400e, label: 'Chalet Ámbar' },
+    { wall: 0x3f6212, roof: 0x1c1917, floor: 0x57534e, label: 'Villa Olivo' },
+    { wall: 0x475569, roof: 0x7c2d12, floor: 0x78716c, label: 'Casa Niebla' },
+    { wall: 0x0f766e, roof: 0x134e4a, floor: 0x115e59, label: 'Casa Laguna' },
+    { wall: 0x6d28d9, roof: 0x1e1b4b, floor: 0x4c1d95, label: 'Mansión Violeta' }
+  ];
+  for (var i = 0; i < 5; i++) { (function (i) { buildLuxuryHouse(p[0] + (i % 3) * 16 - 16, p[2] + Math.floor(i / 3) * 15 - 7, styles[i], i + 1); })(i); }
+}
+function wallSeg(w, h, d, m, x, y, z) { var q = new THREE.Mesh(new THREE.BoxGeometry(w, h, d), m); q.position.set(x, y, z); q.castShadow = q.receiveShadow = true; scene.add(q); return q; }
+function buildLuxuryHouse(hx, hz, st, idx) {
+  var W = 9, D = 7, H = 3.4;
+  var facade = new THREE.MeshStandardMaterial({ map: TEX.facade, roughness: 0.9, color: st.wall });
+  var trimM = new THREE.MeshStandardMaterial({ color: 0xf8fafc, roughness: 0.6 });
+  var woodM = new THREE.MeshStandardMaterial({ color: st.floor, roughness: 0.7 });
+  // solera + porche + valla + jardín (exterior con propósito: cover + scrap)
+  var slab = wallSeg(W + 3, 0.25, D + 3.4, new THREE.MeshStandardMaterial({ map: TEX.concrete }), hx, 0.12, hz);
+  var porch = wallSeg(4.4, 0.3, 2, woodM, hx, 0.28, hz + D / 2 + 1);
+  for (var f = 0; f < 4; f++) wallSeg(0.14, 1.1, 0.14, trimM, hx - 6 + f * 1.2, 0.8, hz + D / 2 + 2.6);
+  wallSeg(4.4, 0.12, 0.14, trimM, hx, 1.35, hz + D / 2 + 2.6);
+  // buzón (scrap) + aire acondicionado + cubos basura (loot)
+  var mail = wallSeg(0.4, 0.5, 0.3, new THREE.MeshStandardMaterial({ color: 0x1d4ed8 }), hx + 3.4, 1, hz + D / 2 + 2.2);
+  destructibles.push({ mesh: mail, hp: 40, maxHp: 40, name: 'Buzón', onDestroy: function (pp) { spawnCrate([pp.x, 0, pp.z], 'materiales'); scene.remove(mail); } });
+  var ac = wallSeg(1, 0.8, 0.6, new THREE.MeshStandardMaterial({ color: 0x9ca3af, metalness: 0.5, roughness: 0.4 }), hx + W / 2 + 0.7, 0.6, hz - 1);
+  destructibles.push({ mesh: ac, hp: 90, maxHp: 90, name: 'Clima', onDestroy: function (pp) { collapseRubble(pp, 0x9ca3af, 2); spawnCrate([pp.x, 0, pp.z], 'materiales'); scene.remove(ac); } });
+  // muros con huecos: frontal (puerta+ventanas), resto ciegos con marcos
+  var zF = hz + D / 2;
+  wallSeg(2.6, H, 0.35, facade, hx - 2.9, H / 2, zF); // izq puerta
+  wallSeg(2.6, H, 0.35, facade, hx + 2.9, H / 2, zF); // der puerta
+  wallSeg(W, 0.7, 0.35, facade, hx, H - 0.35, zF);    // dintel
+  wallSeg(W, H, 0.35, facade, hx, H / 2, hz - D / 2);
+  wallSeg(0.35, H, D, facade, hx - W / 2, H / 2, hz);
+  wallSeg(0.35, H, D, facade, hx + W / 2, H / 2, hz);
+  // ventanas con marco + cristal (se puede disparar a través visualmente, bloquean zombies)
+  [[hx - 2.9, zF], [hx + 2.9, zF]].forEach(function (ww) {
+    wallSeg(1.7, 1.3, 0.1, trimM, ww[0], 1.9, ww[1]);
+    var gl = new THREE.Mesh(new THREE.PlaneGeometry(1.4, 1), new THREE.MeshStandardMaterial({ color: 0x0ea5e9, emissive: 0xfde68a, emissiveIntensity: 0.25, transparent: true, opacity: 0.55 }));
+    gl.position.set(ww[0], 1.9, ww[1] + 0.2); scene.add(gl);
+  });
+  // puerta batiente interactiva E
+  var doorM = new THREE.Mesh(new THREE.BoxGeometry(1.5, 2.6, 0.12), new THREE.MeshStandardMaterial({ color: 0x451a03, roughness: 0.6 }));
+  doorM.position.set(hx, 1.3, zF); doorM.castShadow = true; scene.add(doorM);
+  var knob = new THREE.Mesh(new THREE.SphereGeometry(0.07), new THREE.MeshBasicMaterial({ color: 0xfacc15 })); knob.position.set(0.55, 0, 0.1); doorM.add(knob);
+  var door = { mesh: doorM, closedX: hx, open: false, label: st.label };
+  doors.push(door);
+  // techo + chimenea
+  var roof = new THREE.Mesh(new THREE.ConeGeometry(7.2, 2.4, 4), new THREE.MeshStandardMaterial({ color: st.roof, roughness: 0.8 }));
+  roof.position.set(hx, H + 1.2, hz); roof.rotation.y = Math.PI / 4; roof.castShadow = true; scene.add(roof);
+  wallSeg(0.7, 1.6, 0.7, new THREE.MeshStandardMaterial({ color: 0x78716c }), hx + 2, H + 1.4, hz - 1);
+  // luz cálida interior + lámpara porche
+  var li = new THREE.PointLight(0xfde68a, 0.85, 14); li.position.set(hx, 2.4, hz); scene.add(li);
+  var porchL = new THREE.PointLight(0xfde68a, 0.5, 8); porchL.position.set(hx, 2.2, zF + 1); scene.add(porchL);
+  // ===== INTERIOR lujo: suelo madera, paredes, muebles con loot temático =====
+  makeInterior([hx, 0, hz], W - 1, D - 1, st.label);
+  var inWall = new THREE.MeshStandardMaterial({ color: 0xf1f5f9, roughness: 0.9 });
+  wallSeg(W - 0.6, 0.06, D - 0.6, woodM, hx, 0.17, hz); // parquet
+  // sofá (cover) + mesa + cama + cocina + nevera (comida) + estantería (ammo/med)
+  var sofa = wallSeg(2.4, 0.7, 0.9, new THREE.MeshStandardMaterial({ color: 0x1d4ed8 }), hx - 2, 0.55, hz - 1.6);
+  wallSeg(2.4, 0.6, 0.25, new THREE.MeshStandardMaterial({ color: 0x1e3a8a }), hx - 2, 0.9, hz - 2);
+  destructibles.push({ mesh: sofa, hp: 120, maxHp: 120, name: 'Sofá', onDestroy: function (pp) { collapseRubble(pp, 0x1d4ed8, 2); scene.remove(sofa); } });
+  wallSeg(1.4, 0.5, 0.8, woodM, hx + 0.4, 0.45, hz - 1.2); // mesa
+  var bed = wallSeg(2.1, 0.55, 1.6, new THREE.MeshStandardMaterial({ color: 0xbe123c }), hx + 2.2, 0.5, hz + 1.4);
+  wallSeg(2.1, 0.7, 0.2, trimM, hx + 2.2, 0.7, hz + 2.2);
+  destructibles.push({ mesh: bed, hp: 140, maxHp: 140, name: 'Cama', onDestroy: function (pp) { spawnCrate([pp.x, 0, pp.z], 'curas'); collapseRubble(pp, 0xbe123c, 2); scene.remove(bed); } });
+  // cocina + nevera llena de comida (propósito hambre)
+  wallSeg(2.6, 0.9, 0.7, new THREE.MeshStandardMaterial({ color: 0xe2e8f0 }), hx - 1.6, 0.65, hz + 2.2);
+  var fridge = wallSeg(0.9, 1.9, 0.8, new THREE.MeshStandardMaterial({ color: 0xf8fafc, metalness: 0.4, roughness: 0.35 }), hx - 3.4, 1.1, hz + 2.2);
+  destructibles.push({ mesh: fridge, hp: 110, maxHp: 110, name: 'Nevera', onDestroy: function (pp) { spawnCrate([pp.x + 1, 0, pp.z], 'comida'); spawnCrate([pp.x - 1, 0, pp.z], 'comida'); collapseRubble(pp, 0xf8fafc, 2); scene.remove(fridge); } });
+  // estantería con munición y botiquín visibles
+  var shelf = wallSeg(1.8, 2, 0.4, woodM, hx + 3.4, 1.2, hz - 1.8);
+  var ab = new THREE.Mesh(new THREE.BoxGeometry(0.4, 0.3, 0.3), new THREE.MeshBasicMaterial({ color: 0xfacc15 })); ab.position.set(hx + 3.1, 1.6, hz - 1.8); scene.add(ab);
+  var mb = new THREE.Mesh(new THREE.BoxGeometry(0.4, 0.3, 0.3), new THREE.MeshBasicMaterial({ color: 0xef4444 })); mb.position.set(hx + 3.7, 1.1, hz - 1.8); scene.add(mb);
+  // lámpara techo
+  var lampM = new THREE.Mesh(new THREE.SphereGeometry(0.25), new THREE.MeshBasicMaterial({ color: 0xfef9c3 })); lampM.position.set(hx, 3, hz); scene.add(lampM);
+  // loot temático por casa: comida en cocina + arma/meds + materiales
+  spawnCrate([hx - 1.6, 0, hz + 1.2], 'comida');
+  spawnCrate([hx + 2.5, 0, hz - 0.5], ['rifle', 'escopeta', 'sniper', 'granadas'][idx % 4]);
+  if (idx % 2 === 0) spawnCrate([hx, 0, hz + 0.4], 'blindaje'); else spawnCrate([hx, 0, hz + 0.4], 'curas');
+  var H = { mesh: slab, hp: 900, maxHp: 900, name: st.label, onDestroy: function (pp) { collapseRubble(pp, st.wall, 6); } };
+  destructibles.push(H);
 }
 function makeInterior(center, w, d, label) {
   // zona accesible: suelo distinto + loot + trigger E

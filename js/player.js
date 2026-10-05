@@ -45,31 +45,41 @@ function lockPointer() {
   if (document.pointerLockElement !== el && openMenu === null) { try { el.requestPointerLock(); } catch (e) {} }
 }
 function setupPlayerControls() {
+  // ===== WARZONE PC: WASD+Shift(sprint) Espacio(salto) C/Ctrl(agacharse/deslizar) LMB fuego RMB ADS R recarga E interactuar Q letal F curar/reanimar 1/2 armas 4 placa 5 comer H melee Tab inventario =====
   window.addEventListener('keydown', function (e) {
     var k = e.key.toLowerCase();
-    if (k === 'w') playerInput.f = true; if (k === 's') playerInput.b = true;
-    if (k === 'a') playerInput.l = true; if (k === 'd') playerInput.r = true;
+    if (k === 'w' || k === 'arrowup') playerInput.f = true; if (k === 's' || k === 'arrowdown') playerInput.b = true;
+    if (k === 'a' || k === 'arrowleft') playerInput.l = true; if (k === 'd' || k === 'arrowright') playerInput.r = true;
     if (k === 'shift') playerInput.sprint = true;
+    if (k === ' ') { playerInput.jump = true; e.preventDefault(); }
+    if (k === 'c' || k === 'control') playerInput.crouch = true;
     if (gameMode !== 'participant' || playerIndex < 0) return;
     if (k === 'q') playerThrowGrenade();
     if (k === 'f') playerStartHeal();
     if (k === 'e') playerUse();
-    if (k === 'b') toggleMenu('build');
+    if (k === 'r') playerReload();
+    if (k === 'h') playerMelee();
+    if (k === '4') playerUseArmor();
+    if (k === '5') playerEat();
+    if (k === '1') playerSwapSlot(0);
+    if (k === '2') playerSwapSlot(1);
+    if (k === 'tab') { toggleMenu('inv'); e.preventDefault(); }
     if (k === 'g') toggleMenu('weapons');
     if (k === 'i') toggleMenu('inv');
     if (k === 'o') toggleMenu('design');
     if (k === 't') rallyAllies();
     if (k === 'x') hammerHelp();
     if (k === 'z') toggleTower();
-    if (k === 'r') playerReload();
     if (k === 'v') { viewMode = viewMode === 'fps' ? 'tps' : 'fps'; toast('Vista: ' + viewMode.toUpperCase()); playSound('ui'); }
     if (k === 'escape') closeMenus();
   });
   window.addEventListener('keyup', function (e) {
     var k = e.key.toLowerCase();
-    if (k === 'w') playerInput.f = false; if (k === 's') playerInput.b = false;
-    if (k === 'a') playerInput.l = false; if (k === 'd') playerInput.r = false;
+    if (k === 'w' || k === 'arrowup') playerInput.f = false; if (k === 's' || k === 'arrowdown') playerInput.b = false;
+    if (k === 'a' || k === 'arrowleft') playerInput.l = false; if (k === 'd' || k === 'arrowright') playerInput.r = false;
     if (k === 'shift') playerInput.sprint = false;
+    if (k === ' ') playerInput.jump = false;
+    if (k === 'c' || k === 'control') playerInput.crouch = false;
   });
   document.addEventListener('mousemove', function (e) {
     if (document.pointerLockElement !== renderer.domElement) return;
@@ -101,41 +111,76 @@ function attachViewmodel() {
 }
 function updatePlayer(dt) {
   var p = player(); if (!p || !p.alive || gameMode !== 'participant') return;
+  if (p.downed) { // derribado: arrastre lento, sin disparar, espera reanimación
+    p.reviveT -= dt * gameSpeed;
+    p.mesh.position.x += ((playerInput.f ? -Math.sin(p.yaw) : 0) + (playerInput.b ? Math.sin(p.yaw) : 0)) * dt * 1.2;
+    p.mesh.position.z += ((playerInput.f ? -Math.cos(p.yaw) : 0) + (playerInput.b ? Math.cos(p.yaw) : 0)) * dt * 1.2;
+    camera.position.set(p.mesh.position.x, 1.2, p.mesh.position.z);
+    camera.rotation.order = 'YXZ'; camera.rotation.y = p.yaw; camera.rotation.x = p.pitch * 0.5;
+    if (Math.floor(p.reviveT * 2) % 2 === 0) damageFlash(0.5);
+    if (p.reviveT <= 0) { p.downed = false; p.alive = false; p.hp = 0; log('☠ Tú desangrado'); checkGameOver(); }
+    return;
+  }
+  pollGamepad(p, dt);
   playerFireCd -= dt * gameSpeed;
-  // ADS: FOV 62 -> 40
-  var wantAds = playerInput.ads ? 1 : 0;
-  p.ads += (wantAds - p.ads) * Math.min(1, dt * 10);
-  var fov = 62 - (62 - 40) * p.ads;
-  if (Math.abs(camera.fov - fov) > 0.2) { camera.fov = fov; camera.updateProjectionMatrix(); }
+  if (p.vy === undefined) { p.vy = 0; p.grounded = true; p.crouching = false; p.sliding = 0; p.mag = p.mag !== undefined ? p.mag : WEAPONS[p.weaponKey].mag; p.slots = p.slots || [p.weaponKey, 'pistol']; p.recoilP = 0; }
+  // ADS estilo Warzone: tiempo por arma + FOV por arma + sensibilidad reducida
+  var w0 = WEAPONS[p.weaponKey];
+  var wantAds = (playerInput.ads || GAMEPAD.adsToggle) ? 1 : 0;
+  var adsSpeed = dt / Math.max(0.08, w0.adsTime);
+  p.ads += clamp(wantAds - p.ads, -adsSpeed, adsSpeed);
+  var targetFov = 62 + (w0.adsFov - 62) * p.ads;
+  // sprint táctico sube FOV
+  if (playerInput.sprint && (playerInput.f) && !playerInput.ads) targetFov += 5;
+  if (Math.abs(camera.fov - targetFov) > 0.2) { camera.fov += (targetFov - camera.fov) * Math.min(1, dt * 12); camera.updateProjectionMatrix(); }
   if (viewmodel) {
     viewmodel.position.x = 0.28 * (1 - p.ads) + 0 * p.ads;
-    viewmodel.position.y = -0.24 * (1 - p.ads) + -0.18 * p.ads;
+    viewmodel.position.y = -0.24 * (1 - p.ads) + -0.20 * p.ads;
+    // retroceso visual + sway respiración
+    p.recoilP = Math.max(0, (p.recoilP || 0) - dt * 6);
+    viewmodel.position.z = -0.5 + p.recoilP * 0.12;
+    viewmodel.rotation.x = p.recoilP * 0.25 + Math.sin(performance.now() / 900) * 0.008 * (1 - p.ads);
   }
-  // movimiento WASD relativo a yaw
-  var sp = (playerInput.sprint && p.energy > 1 ? 9 : 5.2) * (playerInput.ads ? 0.55 : 1);
+  // ===== movimiento Warzone: sprint/stamina/hambre/agacharse/salto/deslizar =====
+  var crouching = !!playerInput.crouch;
+  p.crouching = crouching;
+  // slide: sprint + crouch con cooldown
+  if (playerInput.sprint && crouching && (playerInput.f) && (p.slideCd || 0) <= 0 && p.grounded) { p.sliding = 0.55; p.slideCd = 2.2; p.slideDir = p.yaw; playSound('step'); }
+  p.slideCd = Math.max(0, (p.slideCd || 0) - dt);
+  p.sliding = Math.max(0, (p.sliding || 0) - dt);
+  var isSprinting = playerInput.sprint && playerInput.f && !playerInput.ads && !crouching && p.energy > 1 && p.sliding <= 0;
+  var sp = (isSprinting ? 8.6 : crouching ? 2.6 : p.sliding > 0 ? 9.5 : 5.2 * (w0.mobility || 1)) * (playerInput.ads ? 0.55 : 1);
   var mx = (playerInput.r ? 1 : 0) - (playerInput.l ? 1 : 0);
-  var mz = (playerInput.b ? 1 : 0) - (playerInput.f ? 1 : 0);
-  var sin = Math.sin(p.yaw), cos = Math.cos(p.yaw);
-  // forward = -Z en yaw
-  var wx = (mx * cos - mz * sin), wz = (-mx * sin - mz * cos) * -1;
-  // corrección simple: forward hacia donde mira
-  var fx = -Math.sin(p.yaw), fz = -Math.cos(p.yaw);
+  var fx = -Math.sin(p.sliding > 0 ? p.slideDir : p.yaw), fz = -Math.cos(p.sliding > 0 ? p.slideDir : p.yaw);
   var rx = Math.cos(p.yaw), rz = -Math.sin(p.yaw);
   var vx = fx * (playerInput.f ? 1 : 0) + fx * -1 * (playerInput.b ? 1 : 0) + rx * mx;
   var vz = fz * (playerInput.f ? 1 : 0) + fz * -1 * (playerInput.b ? 1 : 0) + rz * mx;
   var l = Math.sqrt(vx * vx + vz * vz);
   p.bobT = (p.bobT || 0);
+  // hambre: sin comida no hay sprint ni regen (propósito comida)
+  p.hunger = p.hunger === undefined ? 100 : p.hunger;
   if (l > 0) {
     p.mesh.position.x += vx / l * sp * dt * gameSpeed;
     p.mesh.position.z += vz / l * sp * dt * gameSpeed;
     p.mesh.rotation.y = p.yaw + Math.PI;
-    animateEntityLimbs(p.mesh, dt, 1.4);
-    p.energy = Math.max(0, p.energy - (playerInput.sprint ? 8 : 2) * dt);
+    // agachado: modelo más bajo
+    var targetH = crouching || p.sliding > 0 ? 0.72 : 1;
+    p.mesh.scale.y += (targetH - p.mesh.scale.y) * Math.min(1, dt * 10);
+    animateEntityLimbs(p.mesh, dt, p.sliding > 0 ? 2.2 : isSprinting ? 1.8 : 1.2);
+    p.energy = Math.max(0, p.energy - ((isSprinting ? 9 : 2) * (p.hunger < 25 ? 1.6 : 1)) * dt);
+    p.hunger = Math.max(0, p.hunger - dt * (isSprinting ? 0.9 : 0.25));
     // headbob + pasos
-    p.bobT += dt * (playerInput.sprint ? 11 : 8);
+    p.bobT += dt * (p.sliding > 0 ? 13 : isSprinting ? 11 : 8);
     p.stepT -= dt * gameSpeed;
-    if (p.stepT <= 0) { p.stepT = playerInput.sprint ? 0.3 : 0.45; playSound('step'); }
-  } else { p.energy = Math.min(100, p.energy + 10 * dt); }
+    if (p.stepT <= 0) { p.stepT = isSprinting ? 0.3 : 0.45; playSound('step'); }
+  } else { p.energy = Math.min(100, p.energy + (p.hunger < 25 ? 4 : 10) * dt); p.mesh.scale.y += (crouching ? 0.72 : 1 - p.mesh.scale.y) * Math.min(1, dt * 10); }
+  // salto / gravedad Warzone (Espacio / A mando / botón móvil)
+  if (playerInput.jump && p.grounded) { p.vy = 4.6; p.grounded = false; playerInput.jump = false; playSound('step'); }
+  if (!p.grounded || p.vy !== 0) {
+    p.vy -= 12 * dt; p.mesh.position.y += p.vy * dt * gameSpeed;
+    if (p.mesh.position.y <= 0) { p.mesh.position.y = 0; p.vy = 0; p.grounded = true; p.landDip = 0.18; playSound('step'); }
+  }
+  p.landDip = Math.max(0, (p.landDip || 0) - dt);
   p.mesh.position.x = clamp(p.mesh.position.x, -105, 105);
   p.mesh.position.z = clamp(p.mesh.position.z, -105, 105);
   // interior: avisar casa accesible
@@ -159,12 +204,13 @@ function updatePlayer(dt) {
   }
   if (viewmodel) viewmodel.visible = (viewMode === 'fps');
   p.mesh.visible = (viewMode === 'tps') || cameraMode !== 'follow';
-  var bobY = Math.sin(p.bobT || 0) * (l > 0 ? (playerInput.ads ? 0.008 : 0.025) : 0);
+  var bobY = Math.sin(p.bobT || 0) * (l > 0 ? (playerInput.ads ? 0.008 : 0.025) : 0) - (p.landDip || 0);
   var bobX = Math.cos((p.bobT || 0) * 0.5) * (l > 0 ? 0.012 : 0);
-  // recarga
-  if (p.reloadT > 0) { p.reloadT -= dt * gameSpeed; if (p.reloadT <= 0) { var need = 30 - p.ammo; var take = Math.min(need, baseResources.ammo); p.ammo += take; baseResources.ammo -= take; toast('🔫 Recargado'); } }
+  // recarga por cargador Warzone
+  if (p.reloadT > 0) { p.reloadT -= dt * gameSpeed; if (p.reloadT <= 0) { var wR = WEAPONS[p.weaponKey]; var need = wR.mag - p.mag; var take = Math.min(need, baseResources.ammo); p.mag += take; baseResources.ammo -= take; p.ammo = p.mag; toast('🔫 Recargado ' + p.mag + '/' + wR.mag); } }
+  var eyeH = (p.crouching ? 1.25 : 1.7) + p.mesh.position.y;
   if (viewMode === 'fps') {
-    camera.position.set(p.mesh.position.x + bobX, 1.7 + bobY, p.mesh.position.z);
+    camera.position.set(p.mesh.position.x + bobX, eyeH + bobY, p.mesh.position.z);
     camera.rotation.set(0, 0, 0);
     camera.rotation.order = 'YXZ'; camera.rotation.y = p.yaw; camera.rotation.x = p.pitch;
     p.mesh.visible = false;
@@ -174,45 +220,61 @@ function updatePlayer(dt) {
     camera.rotation.order = 'YXZ'; camera.rotation.y = p.yaw + Math.PI; camera.rotation.x = p.pitch * 0.6;
     p.mesh.visible = true;
   }
-  // disparo arma propia (MG si opera ya tratado)
+  // disparo Warzone: cargador, retroceso, dispersión cadera/ADS, caída daño, melee
+  if (playerInput.melee) { playerInput.melee = false; playerMelee(); }
   if (playerInput.fire && playerFireCd <= 0 && p.towerOp === null && !(p.reloadT > 0)) {
     var w = WEAPONS[p.weaponKey];
-    if (p.ammo <= 0) { playerReload(); playerInput.fire = false; return; }
-    playerFireCd = w.cd; p.ammo--;
+    if (w.melee) { playerMelee(); playerInput.fire = false; return; }
+    if (p.mag <= 0) { playerReload(); playerInput.fire = false; return; }
+    playerFireCd = w.cd; p.mag--; p.ammo = p.mag;
     playSound('gun', { weapon: p.weaponKey });
-    addShake(p.weaponKey === 'shotgun' ? 0.35 : p.weaponKey === 'sniper' ? 0.4 : 0.12);
+    p.recoilP = Math.min(1.4, (p.recoilP || 0) + w.recoil * 22);
+    p.pitch += w.recoil * (playerInput.ads ? 0.55 : 1); // patada vertical
+    p.yaw += rand(-w.recoil, w.recoil) * 0.35;
+    addShake(p.weaponKey === 'shotgun' ? 0.35 : p.weaponKey === 'sniper' ? 0.4 : 0.1);
     ejectShell(p.mesh.position, p.yaw);
-    if (viewmodel) { viewmodel.position.z = -0.42; setTimeout(function () { if (viewmodel) viewmodel.position.z = -0.5; }, 60); }
-    var range = w.range * (playerInput.ads ? 1.25 : 1);
+    var range = w.range * (playerInput.ads ? 1.25 : 1) * (p.crouching ? 1.1 : 1);
     var dir2 = new THREE.Vector3(); camera.getWorldDirection(dir2);
     var pellets = w.pellets || 1;
     for (var i = 0; i < pellets; i++) {
-      var spread = playerInput.ads ? 0.008 : 0.045;
+      var spread = (playerInput.ads ? w.spreadAds : w.spreadHip) * (p.crouching ? 0.65 : 1) * (l > 0 ? 1.5 : 1) * (p.sliding > 0 ? 2 : 1);
       var d2 = dir2.clone(); d2.x += rand(-spread, spread); d2.y += rand(-spread, spread); d2.z += rand(-spread, spread); d2.normalize();
       var hit2 = raycastZombie(camera.position, d2, range);
       fireBullet(camera.position, hit2.point, range, 0, p);
-      if (hit2.z) damageZombie(hit2.z, rand(w.dmg[0], w.dmg[1]), p);
-      else hitDestructible(camera.position, d2, range, rand(w.dmg[0], w.dmg[1]));
+      var dist = camera.position.distanceTo(hit2.point);
+      if (hit2.z) damageZombie(hit2.z, warzoneDamage(w, dist), p);
+      else hitDestructible(camera.position, d2, range, warzoneDamage(w, dist));
     }
     createMuzzleFlash(p.mesh.position, p.yaw + Math.PI, p.weaponKey === 'shotgun' || p.weaponKey === 'sniper');
   }
-  // curación con F (canalizada)
+  // curación / reanimación con F (canalizada Warzone)
+  if (p.meleeCd) p.meleeCd -= dt * gameSpeed;
+  if (p.nadeCd) p.nadeCd -= dt * gameSpeed;
   if (playerHealTarget) {
     playerHealT -= dt * gameSpeed;
     if (!playerHealTarget.alive || dist2D(p.mesh.position, playerHealTarget.mesh.position) > 3.5) { playerHealTarget = null; }
     else if (playerHealT <= 0) {
-      playerHealTarget.hp = Math.min(playerHealTarget.maxHp, playerHealTarget.hp + 40);
-      spawnHealFX(playerHealTarget.mesh.position);
+      if (playerHealTarget.downed) { reviveSurvivor(playerHealTarget); toast('🚑 Reanimado'); }
+      else {
+        playerHealTarget.hp = Math.min(playerHealTarget.maxHp, playerHealTarget.hp + 40);
+        spawnHealFX(playerHealTarget.mesh.position);
+        toast('Aliado curado +40');
+      }
       playSound('heal');
       if (p.meds > 0) p.meds--; else if (baseResources.med > 0) baseResources.med--;
-      playerHealTarget = null; toast('Aliado curado +40');
+      playerHealTarget = null;
     }
   }
-  // recoger loot pisándolo
+  // hambre pasiva jugador + regen si saciado (propósito comida)
+  p.hunger = p.hunger === undefined ? 100 : p.hunger;
+  p.hunger = Math.max(0, p.hunger - dt * 0.35);
+  if (p.hunger > 40 && p.hp < p.maxHp && p.hp > 0 && !p.downed) p.hp = Math.min(p.maxHp, p.hp + dt * 1.2);
+  if (p.magByWeapon) p.magByWeapon[p.weaponKey] = p.mag;
+  // recoger loot pisándolo (todo con propósito)
   for (var i = loots.length - 1; i >= 0; i--) {
     var lt = loots[i];
     if (dist2D(p.mesh.position, lt.mesh.position) < 1.5) {
-      if (lt.kind === 'ammo') { p.ammo += 12; baseResources.ammo += 6; }
+      if (lt.kind === 'ammo') { p.mag = Math.min(WEAPONS[p.weaponKey].mag, p.mag + 12); p.ammo = p.mag; baseResources.ammo += 6; }
       if (lt.kind === 'med') baseResources.med++;
       if (lt.kind === 'scrap') baseResources.scrap = Math.min(1000, baseResources.scrap + 10);
       scene.remove(lt.mesh); loots.splice(i, 1); playSound('pickup');
@@ -248,21 +310,101 @@ function hitDestructible(origin, dir, range, dmg) {
 }
 function playerReload() {
   var p = player(); if (!p || p.reloadT > 0) return;
-  if (p.ammo >= 30 || baseResources.ammo <= 0) return;
-  p.reloadT = 1.6; playSound('reload'); toast('🔄 Recargando… [R]');
+  var w = WEAPONS[p.weaponKey]; if (w.melee) return;
+  if (p.mag >= w.mag || baseResources.ammo <= 0) { if (baseResources.ammo <= 0) toast('Sin reserva'); return; }
+  p.reloadT = w.reload; playSound('reload'); toast('🔄 Recargando ' + w.name + '…');
 }
+function playerMelee() {
+  var p = player(); if (!p || (p.meleeCd || 0) > 0) return;
+  p.meleeCd = 0.55; playSound('hit'); addShake(0.15);
+  var bonus = (baseResources.meleeLvl || 0) * 8;
+  var hit = false;
+  zombies.forEach(function (z) { if (!z.alive) return; if (dist2D(p.mesh.position, z.mesh.position) < 2.6) { damageZombie(z, 55 + bonus, p); hit = true; } });
+  destructibles.forEach(function (d) { if (!d.dead && dist2D(p.mesh.position, d.mesh.position) < 2.8) { damageDestructible(d, 60); hit = true; } });
+  if (viewmodel) { viewmodel.rotation.x = -0.9; setTimeout(function () { if (viewmodel) viewmodel.rotation.x = 0; }, 160); }
+  if (!hit) toast('🔪 Aire');
+}
+function playerUseArmor() {
+  var p = player(); if (!p) return;
+  if (baseResources.armor <= 0) { toast('Sin placas (busca blindaje)'); return; }
+  if ((p.plates || 0) >= 3) { toast('Placas al máximo 3'); return; }
+  baseResources.armor--; p.plates = (p.plates || 0) + 1; p.armorHP = (p.armorHP || 0) + 50;
+  playSound('pickup'); toast('🛡 Placa ' + p.plates + '/3 (+50)');
+}
+function playerEat() {
+  var p = player(); if (!p) return;
+  if (baseResources.food <= 0) { toast('Sin comida (saquea casas/neveras)'); return; }
+  if (p.hunger > 95 && p.hp > 95) { toast('Saciado'); return; }
+  baseResources.food--; p.hunger = Math.min(100, p.hunger + 38); p.hp = Math.min(p.maxHp, p.hp + 18); p.energy = Math.min(100, p.energy + 30);
+  playSound('heal'); toast('🍖 +' + Math.round(p.hunger) + ' saciedad · +18 HP');
+}
+function playerSwapSlot(i) {
+  var p = player(); if (!p || !p.slots) return;
+  var key = p.slots[i]; if (!key || key === p.weaponKey) return;
+  p.weaponKey = key; p.mag = p.ammo = p.magByWeapon && p.magByWeapon[key] !== undefined ? p.magByWeapon[key] : WEAPONS[key].mag;
+  if (p.gunMesh) p.mesh.remove(p.gunMesh);
+  p.gunMesh = createWeaponMesh(key); p.gunMesh.position.set(0.36, 1.35, 0.45); p.mesh.add(p.gunMesh);
+  attachViewmodel(); playSound('reload'); toast('🔫 ' + WEAPONS[key].name + ' [1/2]');
+}
+// ===== MANDO estilo Warzone (Gamepad API): LT ADS / RT fuego / A salto / B agacharse-slide / X recarga-interactuar / Y armas / LB letal / RB melee-curar / cruceta placas-comida =====
+var _padPrev = {};
+function pollGamepad(p, dt) {
+  try {
+    var pads = navigator.getGamepads ? navigator.getGamepads() : [];
+    var g = null;
+    for (var i = 0; i < pads.length; i++) if (pads[i] && pads[i].connected) { g = pads[i]; break; }
+    if (!g) { GAMEPAD.active = false; return; }
+    GAMEPAD.active = true;
+    function dz(v) { return Math.abs(v) < 0.18 ? 0 : v; }
+    var lx = dz(g.axes[0] || 0), ly = dz(g.axes[1] || 0), rx = dz(g.axes[2] || 0), ry = dz(g.axes[3] || 0);
+    var sens = 0.055 * (playerInput.ads ? 0.55 : 1);
+    p.yaw -= rx * sens * dt * 60 * 0.055; p.pitch -= ry * sens * dt * 60 * 0.055;
+    p.pitch = clamp(p.pitch, -1.2, 1.2);
+    // stick izq = WASD
+    playerInput.f = ly < -0.25; playerInput.b = ly > 0.25; playerInput.l = lx < -0.25; playerInput.r = lx > 0.25;
+    playerInput.sprint = g.buttons[10] && g.buttons[10].pressed; // L3 sprint táctico
+    var b = function (n) { return g.buttons[n] && g.buttons[n].pressed; };
+    var bv = function (n) { return g.buttons[n] ? g.buttons[n].value : 0; };
+    playerInput.fire = bv(7) > 0.25;
+    playerInput.ads = bv(6) > 0.25;
+    function edge(n, fn) { var pr = _padPrev[n] || false, now = b(n); if (now && !pr) fn(); _padPrev[n] = now; }
+    edge(0, function () { playerInput.jump = true; });           // A salto
+    edge(1, function () { playerInput.crouch = !playerInput.crouch; }); // B agacharse/slide toggle
+    edge(2, function () { if (p.mag <= 0) playerReload(); else playerUse(); }); // X recarga/interactuar
+    edge(3, function () { playerSwapSlot(p.weaponKey === (p.slots||[])[0] ? 1 : 0); }); // Y armas
+    edge(4, function () { playerThrowGrenade(); });              // LB letal
+    edge(5, function () { var a = nearestDowned(p, 4) || nearestHurt(p); if (a) playerStartHeal(); else playerMelee(); }); // RB curar/melee
+    edge(8, function () { toggleMenu('inv'); });
+    edge(9, function () { closeMenus(); });
+    // cruceta: izq placa, der comida, arriba granada ya, abajo martillo
+    edge(14, function () { playerUseArmor(); });
+    edge(15, function () { playerEat(); });
+    edge(12, function () { toggleTower(); });
+  } catch (e) {}
+}
+function nearestDowned(p, maxD) { var best = null, bd = maxD; survivors.forEach(function (o) { if (o === p || o.downed !== true) return; var d = dist2D(p.mesh.position, o.mesh.position); if (d < bd) { bd = d; best = o; } }); return best; }
+function nearestHurt(p) { var best = null, bd = 3; survivors.forEach(function (o) { if (o === p || !o.alive || o.downed || o.hp > 90) return; var d = dist2D(p.mesh.position, o.mesh.position); if (d < bd) { bd = d; best = o; } }); return best; }
 function playerThrowGrenade() { var p = player(); if (!p || p.grenades <= 0) { toast('Sin granadas'); return; } if (p.nadeCd > 0) return; p.nadeCd = 2; var dir = new THREE.Vector3(); camera.getWorldDirection(dir); var tp = p.mesh.position.clone().add(dir.multiplyScalar(12)); throwGrenade(p, tp); }
 function playerStartHeal() {
   var p = player(); if (!p) return;
+  // prioridad: reanimar derribado (Warzone revive)
+  var down = nearestDowned(p, 3.5);
+  if (down) { playerHealTarget = down; playerHealT = 3; toast('🚑 Reanimando a ' + down.name + '… ¡cúbrete!'); return; }
   var best = null, bd = 3;
-  survivors.forEach(function (o) { if (o === p || !o.alive || o.hp > 90) return; var d = dist2D(p.mesh.position, o.mesh.position); if (d < bd) { bd = d; best = o; } });
-  if (!best) { toast('Sin aliados heridos ≤3m'); return; }
-  if (p.meds <= 0 && baseResources.med <= 0) { toast('Sin botiquines'); return; }
+  survivors.forEach(function (o) { if (o === p || !o.alive || o.downed || o.hp > 90) return; var d = dist2D(p.mesh.position, o.mesh.position); if (d < bd) { bd = d; best = o; } });
+  if (!best) { toast('Sin aliados heridos ≤3m (F)'); return; }
+  if (p.meds <= 0 && baseResources.med <= 0) { toast('Sin botiquines (busca curas)'); return; }
   playerHealTarget = best; playerHealT = 1.5;
   toast('Curando a ' + best.name + '…');
 }
 function playerUse() {
   var p = player(); if (!p) return;
+  // 0) reanimar tiene prioridad si hay derribado encima
+  var down = nearestDowned(p, 2.5);
+  if (down) { playerStartHeal(); return; }
+  // 1) puerta cercana (casas lujo E)
+  var door = nearestDoor(p.mesh.position, 2.8);
+  if (door) { toggleDoor(door); return; }
   var c = nearestCrate(p.mesh.position, 2.5);
   if (c) {
     if (p.carriedCrate) { toast('Ya llevas caja (I para soltar)'); return; }
@@ -428,51 +570,76 @@ function renderDesign() {
 // ---- táctil ----
 var joy = { dx: 0, dy: 0, id: null };
 function setupTouch() {
+  // ===== COD MOBILE: joystick izq (empuja lejos = sprint) + swipe der mirar + doble fuego =====
   var js = document.getElementById('joystick'), st = document.getElementById('stick');
   if (!js) return;
-  js.addEventListener('touchstart', function (e) { joy.id = e.changedTouches[0].identifier; }, { passive: true });
-  window.addEventListener('touchmove', function (e) {
+  window._joy = window._joy || { id: null, dx: 0, dy: 0 };
+  var joy = window._joy;
+  js.addEventListener('touchstart', function (e) { joy.id = e.changedTouches[0].identifier; e.preventDefault(); }, { passive: false });
+  var lookId = null, lx = 0, ly = 0;
+  var lookArea = document.getElementById('look-area');
+  function onLookStart(e) {
     for (var i = 0; i < e.changedTouches.length; i++) {
       var t = e.changedTouches[i];
+      if (t.clientX > window.innerWidth * 0.35 && lookId === null && t.identifier !== joy.id) { lookId = t.identifier; lx = t.clientX; ly = t.clientY; }
+    }
+  }
+  function onLookMove(e) {
+    for (var i = 0; i < e.changedTouches.length; i++) {
+      var t = e.changedTouches[i];
+      if (t.identifier === lookId) {
+        var p2 = player();
+        if (p2) { p2.yaw -= (t.clientX - lx) * 0.0042; p2.pitch -= (t.clientY - ly) * 0.0032; p2.pitch = clamp(p2.pitch, -1.2, 1.2); }
+        lx = t.clientX; ly = t.clientY;
+      }
       if (t.identifier === joy.id) {
         var r = js.getBoundingClientRect();
-        var dx = t.clientX - (r.left + 60), dy = t.clientY - (r.top + 60);
-        var l = Math.sqrt(dx * dx + dy * dy) || 1, m = Math.min(1, l / 50);
+        var dx = t.clientX - (r.left + 65), dy = t.clientY - (r.top + 65);
+        var l = Math.sqrt(dx * dx + dy * dy) || 1, m = Math.min(1, l / 55);
         joy.dx = dx / l * m; joy.dy = dy / l * m;
-        st.style.left = (35 + joy.dx * 35) + 'px'; st.style.top = (35 + joy.dy * 35) + 'px';
-        var p = player(); if (p) { playerInput.f = joy.dy < -0.3; playerInput.b = joy.dy > 0.3; playerInput.l = joy.dx < -0.3; playerInput.r = joy.dx > 0.3; }
-      } else if (t.identifier === 'look') {
-        var p2 = player(); if (p2) { p2.yaw -= (t.clientX - (joy.lx || t.clientX)) * 0.005; p2.pitch -= (t.clientY - (joy.ly || t.clientY)) * 0.004; }
-        joy.lx = t.clientX; joy.ly = t.clientY;
+        st.style.left = (40 + joy.dx * 40) + 'px'; st.style.top = (40 + joy.dy * 40) + 'px';
+        var p = player();
+        if (p) {
+          playerInput.f = joy.dy < -0.3; playerInput.b = joy.dy > 0.3; playerInput.l = joy.dx < -0.3; playerInput.r = joy.dx > 0.3;
+          playerInput.sprint = m > 0.92; // empuja al borde = sprint táctico CODM
+        }
       }
     }
-  }, { passive: true });
-  window.addEventListener('touchend', function (e) {
+    if (e.cancelable) e.preventDefault();
+  }
+  function onLookEnd(e) {
     for (var i = 0; i < e.changedTouches.length; i++) {
-      if (e.changedTouches[i].identifier === joy.id) { joy.id = null; joy.dx = joy.dy = 0; st.style.left = '35px'; st.style.top = '35px'; playerInput.f = playerInput.b = playerInput.l = playerInput.r = false; }
-      if (e.changedTouches[i].identifier === 'look') { joy.lx = joy.ly = null; }
+      if (e.changedTouches[i].identifier === lookId) lookId = null;
+      if (e.changedTouches[i].identifier === joy.id) { joy.id = null; joy.dx = joy.dy = 0; st.style.left = '40px'; st.style.top = '40px'; playerInput.f = playerInput.b = playerInput.l = playerInput.r = playerInput.sprint = false; }
     }
-  });
-  // deslizar para girar (zona canvas)
-  var lastT = null;
-  document.getElementById('game-container').addEventListener('touchstart', function (e) {
-    if (e.touches.length === 1 && e.touches[0].clientX > 160) { var t = e.touches[0]; t.identifier = 'look'; joy.lx = t.clientX; joy.ly = t.clientY; try { e._lk = true; } catch (x) {} }
-  }, { passive: true });
-  document.querySelectorAll('#touch-btns button').forEach(function (b) {
+  }
+  document.addEventListener('touchstart', onLookStart, { passive: true });
+  document.addEventListener('touchmove', onLookMove, { passive: false });
+  document.addEventListener('touchend', onLookEnd);
+  document.addEventListener('touchcancel', onLookEnd);
+  document.querySelectorAll('#touch-btns-codm button').forEach(function (b) {
     b.addEventListener('touchstart', function (e) {
-      e.preventDefault();
-      var k = b.dataset.t, p = player();
-      if (k === 'fire') playerInput.fire = true;
-      if (k === 'ads') playerInput.ads = true;
+      e.preventDefault(); e.stopPropagation();
+      var k = b.dataset.t;
+      if (k === 'hipfire') { playerInput.fire = true; playerInput.ads = false; }
+      if (k === 'adsfire') { playerInput.fire = true; playerInput.ads = true; }
+      if (k === 'ads') { GAMEPAD.adsToggle = !GAMEPAD.adsToggle; playerInput.ads = GAMEPAD.adsToggle; b.style.borderColor = GAMEPAD.adsToggle ? '#ef4444' : '#10b981'; }
+      if (k === 'jump') playerInput.jump = true;
+      if (k === 'crouch') { var p = player(); if (p && playerInput.sprint && playerInput.f) { p.sliding = 0.55; p.slideCd = 2.2; p.slideDir = p.yaw; } else playerInput.crouch = !playerInput.crouch; }
+      if (k === 'reload') playerReload();
       if (k === 'nade') playerThrowGrenade();
-      if (k === 'use') playerUse();
-      if (k === 'build') toggleMenu('build');
       if (k === 'heal') playerStartHeal();
+      if (k === 'knife') playerMelee();
+      if (k === 'use') playerUse();
+      if (k === 'swap') { var pp = player(); if (pp) playerSwapSlot(pp.weaponKey === (pp.slots || [])[0] ? 1 : 0); }
+      if (k === 'armor') playerUseArmor();
+      if (k === 'eat') playerEat();
+      if (k === 'build') toggleMenu('build');
       if (k === 'tower') toggleTower();
-      if (k === 'hammer') hammerHelp();
-      if (k === 'inv') toggleMenu('inv');
-      if (k === 'rally') rallyAllies();
+    }, { passive: false });
+    b.addEventListener('touchend', function (e) {
+      var k = b.dataset.t;
+      if (k === 'hipfire' || k === 'adsfire') { playerInput.fire = false; if (k === 'adsfire') playerInput.ads = GAMEPAD.adsToggle; }
     });
-    b.addEventListener('touchend', function () { if (b.dataset.t === 'fire') playerInput.fire = false; if (b.dataset.t === 'ads') playerInput.ads = false; });
   });
 }

@@ -297,19 +297,23 @@ function zombieTarget(z) {
   return null;
 }
 function zombieAttack(z, tgt) {
+  playZombieAttack(z.mesh);
   var dmg = z.dmg * rand(0.85, 1.15);
   if (tgt.type === 'surv') damageSurvivor(tgt.ref, dmg);
-  else if (tgt.type === 'depot') damageShelter(tgt.ref, dmg);
-  else if (tgt.type === 'wall' || tgt.type === 'barricade') { tgt.ref.hp -= dmg; if (tgt.ref.hp <= 0) removeStruct(tgt.ref, tgt.type); }
+  else if (tgt.type === 'depot') { damageShelter(tgt.ref, dmg); spawnImpactFX(tgt.pos, 0xf59e0b); }
+  else if (tgt.type === 'wall' || tgt.type === 'barricade') { tgt.ref.hp -= dmg; spawnImpactFX(tgt.pos, 0x9ca3af); if (tgt.ref.hp <= 0) removeStruct(tgt.ref, tgt.type); }
   else if (tgt.type === 'dummy') { tgt.ref.hp -= dmg; if (tgt.ref.hp <= 0) detonateDummy(tgt.ref); }
-  else if (tgt.type === 'tank') { var rem = dmg; if (tank.armor > 0) { var ab = Math.min(tank.armor, rem); tank.armor -= ab; rem -= ab; } tank.hp -= rem; if (tank.hp <= 0) destroyTank(); }
+  else if (tgt.type === 'tank') { var rem = dmg; if (tank.armor > 0) { var ab = Math.min(tank.armor, rem); tank.armor -= ab; rem -= ab; } tank.hp -= rem; spawnImpactFX(tgt.pos, 0xfacc15); if (tank.hp <= 0) destroyTank(); }
 }
 function damageSurvivor(s, dmg) {
   if (!s.alive) return;
   if (s.armor > 0) { var ab = Math.min(s.armor * 10, dmg); dmg -= ab; }
   s.hp -= dmg;
   flashHit(s);
-  if (s.hp <= 0) { s.hp = 0; s.alive = false; s.mesh.rotation.x = -Math.PI / 2; s.mesh.position.y = 0.3; log('☠ ' + s.name + ' cayó'); checkGameOver(); }
+  spawnBlood(s.mesh.position, false);
+  if (s.isPlayer) { damageFlash(dmg / 40); playSound('hurt'); addShake(0.35); }
+  else if (dist2D(s.mesh.position, camera.position) < 25) playSound('hurt');
+  if (s.hp <= 0) { s.hp = 0; s.alive = false; s.mesh.rotation.x = -Math.PI / 2; s.mesh.position.y = 0.3; spawnBlood(s.mesh.position, true); log('☠ ' + s.name + ' cayó'); killfeed('☠ ' + s.name + ' cayó'); checkGameOver(); }
 }
 function damageShelter(zone, dmg) {
   if (!zone.depot) return;
@@ -334,11 +338,19 @@ function damageZombie(z, dmg, killer) {
   if (!z.alive) return;
   z.hp -= dmg;
   showHitmarker();
+  playHitFlinch(z.mesh);
+  spawnBlood(z.mesh.position, false);
   if (z.hp <= 0) {
-    z.alive = false; scene.remove(z.mesh);
+    z.alive = false;
+    spawnBlood(z.mesh.position, true);
+    // muerte: caída + hundido
+    try { z.mesh.rotation.x = -Math.PI / 2; } catch (e) {}
+    var _m = z.mesh;
+    setTimeout(function () { try { scene.remove(_m); } catch (e) {} }, 900);
     zombies.splice(zombies.indexOf(z), 1);
     STATS.kills++;
-    if (killer) killer.kills = (killer.kills || 0) + 1;
+    if (killer) { killer.kills = (killer.kills || 0) + 1; if (killer.isPlayer) addShake(0.12); }
+    if (window.killfeed && Math.random() < 0.6) killfeed('☠ ' + (killer ? killer.name : 'Torreta') + ' → ' + ZOMBIE_TYPES[z.kind].name);
     if (Math.random() < 0.22) spawnLoot(z.mesh.position);
     if (isWaveActive && !zombies.length && !spawnQueue.length) endWave();
   }

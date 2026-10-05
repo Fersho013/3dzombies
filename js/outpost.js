@@ -31,7 +31,9 @@ function buildTurretPost(kind, pos) {
   var bar = new THREE.Mesh(new THREE.CylinderGeometry(0.07, 0.07, 1.4), new THREE.MeshStandardMaterial({ color: 0x111827 }));
   bar.rotation.x = Math.PI / 2; bar.position.set(0, 1.4, 0.7); g.add(bar);
   g.position.set(pos.x, 0, pos.z); scene.add(g);
-  turretPosts.push({ mesh: g, head: head, kind: kind, cfg: cfg, cd: 0 });
+  var tp = { mesh: g, head: head, kind: kind, cfg: cfg, cd: 0 };
+  turretPosts.push(tp);
+  if (typeof addDynamicSolid === 'function') addDynamicSolid(tp, pos.x, pos.z, 1.2, 1.2);
   STATS.built++;
   log('🔫 Torreta ' + kind + ' instalada');
 }
@@ -51,7 +53,9 @@ function buildMGnest(pos) {
   mg.position.y = 5.3; g.add(mg);
   g.position.set(pos.x, 0, pos.z); scene.add(g);
   var nest = { mesh: g, mg: mg, cd: 0, operator: null, platY: 4.7 };
-  turretPosts.push({ mesh: g, head: mg, kind: 'mgnest', cfg: { dmg: [18, 32], range: 38, rate: 0.09, color: 0xf59e0b }, cd: 0, nest: nest, isNest: true });
+  var post = { mesh: g, head: mg, kind: 'mgnest', cfg: { dmg: [18, 32], range: 38, rate: 0.09, color: 0xf59e0b }, cd: 0, nest: nest, isNest: true };
+  turretPosts.push(post);
+  if (typeof addDynamicSolid === 'function') addDynamicSolid(post, pos.x, pos.z, 3, 3);
   STATS.built++;
   log('🎯 Torre MG operable lista (Z para subir)');
   return nest;
@@ -70,7 +74,9 @@ function buildSpikeTrap(pos) {
 function buildWallAt(pos) {
   var m = new THREE.Mesh(new THREE.BoxGeometry(3, 2.2, 0.5), new THREE.MeshStandardMaterial({ color: 0x78716c }));
   m.position.set(pos.x, 1.1, pos.z); m.castShadow = true; scene.add(m);
-  walls.push({ mesh: m, hp: 300, maxHp: 300 });
+  var wl = { mesh: m, hp: 300, maxHp: 300 };
+  walls.push(wl);
+  if (typeof addDynamicSolid === 'function') addDynamicSolid(wl, pos.x, pos.z, 3, 0.6);
 }
 function updateOutpostSystems(dt) {
   // puestos auto + nidos MG + trampas

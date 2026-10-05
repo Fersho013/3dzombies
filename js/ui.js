@@ -91,6 +91,9 @@ function drawMinimap() {
   outposts.forEach(function (o) { g.strokeStyle = '#10b981'; g.beginPath(); g.arc(75 + o.pos.x / 220 * 150, 75 + o.pos.z / 220 * 150, o.radius / 220 * 150, 0, 7); g.stroke(); });
   if (tank.yard) { g.strokeStyle = '#f59e0b'; g.strokeRect(75 + tank.yard.pos.x / 220 * 150 - 8, 75 + tank.yard.pos.z / 220 * 150 - 8, 16, 16); }
   crates.forEach(function (c) { dot(c.pos.x, c.pos.z, '#f59e0b', 2); });
+  if (typeof mysteryBoxes !== 'undefined') mysteryBoxes.forEach(function (b) { dot(b.x, b.z, '#3b82f6', 5); });
+  if (typeof wallbuys !== 'undefined') wallbuys.forEach(function (w) { dot(w.x, w.z, '#10b981', 4); });
+  if (typeof powerups !== 'undefined') powerups.forEach(function (p) { dot(p.mesh.position.x, p.mesh.position.z, '#facc15', 5); });
   walls.forEach(function (w) { dot(w.mesh.position.x, w.mesh.position.z, '#64748b', 2); });
   turretPosts.forEach(function (p) { dot(p.mesh.position.x, p.mesh.position.z, '#22d3ee', 3); });
   // zombies rojos
@@ -140,7 +143,7 @@ function updateUI(dt) {
   document.getElementById('d-food').textContent = baseResources.food;
   document.getElementById('d-heavy').textContent = baseResources.heavy;
   document.getElementById('d-armor').textContent = baseResources.armor;
-  document.getElementById('kills').textContent = 'Bajas: ' + STATS.kills;
+  document.getElementById('kills').textContent = 'Bajas: ' + STATS.kills + (typeof powerTimers !== 'undefined' && (powerTimers.insta > 0 || powerTimers.doublePts > 0) ? (' · ' + (powerTimers.insta > 0 ? '💀' + Math.ceil(powerTimers.insta) + 's ' : '') + (powerTimers.doublePts > 0 ? '⭐x2 ' + Math.ceil(powerTimers.doublePts) + 's' : '')) : '');
   // progreso oleada
   var wf = document.getElementById('wave-fill');
   if (wf) wf.style.width = isWaveActive ? (zombies.length ? 100 - Math.min(99, zombies.length / Math.max(1, waveCount(currentWave)) * 100) : 100) + '%' : (100 - waveTimer / (customSettings.prepTime || 180) * 100) + '%';
@@ -165,9 +168,9 @@ function updateUI(dt) {
       var d = document.createElement('div'); d.className = 'surv-card' + (s.alive ? '' : ' dead');
       var pct = Math.round(100 * s.hp / s.maxHp);
       d.innerHTML = '<b>' + s.name + '</b> <span class="opacity-60">' + s.role + ' · ' + WEAPONS[s.weaponKey].name + '</span>' +
-        (s.isPlayer ? ' 🎮' : '') + (s.towerOp ? ' 🗼' : '') + (s.carriedCrate ? ' 📦' + s.carriedCrate : '') +
-        (insideInterior && insideInterior(s.mesh.position) ? ' 🏠' + insideInterior(s.mesh.position).label : '') +
-        '<br>HP ' + Math.ceil(s.hp) + ' · ⚡' + Math.ceil(s.energy) + ' · 🔫' + s.ammo + ' · 💣' + s.grenades + ' · ☠' + (s.kills || 0) +
+        (s.isPlayer ? ' 🎮' : '') + (s.towerOp ? ' 🗼' : '') + ((s.carriedCrates && s.carriedCrates.length) ? ' 📦' + s.carriedCrates.length + '/3' : (s.carriedCrate ? ' 📦1/3' : '')) +
+        (s._inside ? ' 🏠' + s._inside : (insideInterior && insideInterior(s.mesh.position) ? ' 🏠' + insideInterior(s.mesh.position).label : '')) +
+        '<br>HP ' + Math.ceil(s.hp) + ' · ⭐' + (s.points || 0) + ' · ⚡' + Math.ceil(s.energy) + ' · 🔫' + s.ammo + ' · 💣' + s.grenades + ' · ☠' + (s.kills || 0) +
         '<div class="hpbar"><i style="width:' + pct + '%"></i></div><div class="text-[10px] opacity-60">' + s.state + '</div>';
       d.onclick = function () { playSound('ui'); selectedSurvivor = s; renderInspector(); if (gameMode !== 'participant') { cameraMode = 'follow'; cameraTargets.followIdx = idx; toast('👁 Siguiendo a ' + s.name + ' — arrastra para orbitar, rueda para zoom'); } else if (idx === playerIndex) { cameraMode = 'follow'; cameraTargets.followIdx = idx; } };
       tl.appendChild(d);
@@ -190,10 +193,10 @@ function renderInspector() {
   if (!s) { el.textContent = 'Selecciona un superviviente…'; return; }
   var interior = (typeof insideInterior === 'function' && insideInterior(s.mesh.position)) || null;
   el.innerHTML = '<b>' + s.name + '</b> (' + s.role + ')' + (interior ? '<br>🏠 Dentro: ' + interior.label : '<br>🌆 Exterior') +
-    '<br>❤ ' + Math.ceil(s.hp) + '/' + s.maxHp + ' · ⚡ ' + Math.ceil(s.energy) +
+    '<br>❤ ' + Math.ceil(s.hp) + '/' + s.maxHp + ' · ⭐ ' + (s.points || 0) + ' pts · ⚡ ' + Math.ceil(s.energy) +
     '<br>🔫 ' + WEAPONS[s.weaponKey].name + ' · ' + WEAPONS[s.weaponKey].dmg[0] + '-' + WEAPONS[s.weaponKey].dmg[1] + ' · ' + WEAPONS[s.weaponKey].range + 'm' +
     '<br>Ammo ' + s.ammo + ' · 💣' + s.grenades + ' · ⛑' + s.meds +
-    '<br>Estado ' + s.state + ' · Bajas ' + (s.kills || 0) + (s.carriedCrate ? '<br>📦 Lleva ' + s.carriedCrate : '');
+    '<br>Estado ' + s.state + ' · Bajas ' + (s.kills || 0) + ((s.carriedCrates && s.carriedCrates.length) ? '<br>📦 Lleva ' + s.carriedCrates.length + '/3: ' + s.carriedCrates.join('+') : (s.carriedCrate ? '<br>📦 Lleva ' + s.carriedCrate : ''));
 }
 function updatePlayerBars() {
   var p = survivors[playerIndex];
@@ -203,7 +206,7 @@ function updatePlayerBars() {
   document.getElementById('bar-hp').style.width = (100 * p.hp / p.maxHp) + '%';
   document.getElementById('bar-en').style.width = p.energy + '%';
   document.getElementById('bar-am').style.width = Math.min(100, p.ammo * 2) + '%';
-  document.getElementById('ammo-label').textContent = WEAPONS[p.weaponKey].name + ' ' + p.ammo + (p.reloadT > 0 ? ' RECARGANDO…' : '') + ' · 💣' + p.grenades + ' · ⛑' + p.meds;
+  document.getElementById('ammo-label').textContent = WEAPONS[p.weaponKey].name + ' ' + p.ammo + (p.reloadT > 0 ? ' RECARGANDO…' : '') + ' · ⭐' + (p.points || 0) + ' · 💣' + p.grenades + ' · ⛑' + p.meds;
   document.getElementById('crosshair').classList.toggle('hidden', !(gameMode === 'participant' && openMenu === null));
   // prompt interactivo E
   var pr = document.getElementById('interact-prompt');
@@ -214,6 +217,8 @@ function updatePlayerBars() {
   }
 }
 function nearbyInteractText(p) {
+  if (typeof nearestBox === 'function' && nearestBox(p.mesh.position, 3)) return '[E] 📦 Caja misteriosa 950 (' + (p.points || 0) + ' pts)';
+  if (typeof nearestWallbuy === 'function' && nearestWallbuy(p.mesh.position, 3)) { var wb = nearestWallbuy(p.mesh.position, 3); return '[E] 🔫 ' + wb.def.label + ' (' + (p.points || 0) + ' pts)'; }
   var c = (typeof nearestCrate === 'function' && nearestCrate(p.mesh.position, 2.6));
   if (c) return '[E] ' + c.kind;
   for (var i = 0; i < activeShelterKeys.length; i++) { var z = ZONES[activeShelterKeys[i]]; if (z.depot && dist2D(p.mesh.position, z.depot.mesh.position) < 5) return '[E] depósito'; }

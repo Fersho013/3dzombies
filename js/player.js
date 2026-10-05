@@ -189,6 +189,7 @@ function updatePlayer(dt) {
   p.landDip = Math.max(0, (p.landDip || 0) - dt);
   p.mesh.position.x = clamp(p.mesh.position.x, -105, 105);
   p.mesh.position.z = clamp(p.mesh.position.z, -105, 105);
+  if (typeof updateInsideMemory === 'function') updateInsideMemory(p);
   // interior: avisar casa accesible
   try { var inn = insideInterior(p.mesh.position); if (inn && inn._last !== Math.floor(performance.now() / 5000)) { inn._last = Math.floor(performance.now() / 5000); } } catch (e) {}
   // cámara FPS/TPS o torre MG
@@ -408,20 +409,24 @@ function playerUse() {
   // 0) reanimar tiene prioridad si hay derribado encima
   var down = nearestDowned(p, 2.5);
   if (down) { playerStartHeal(); return; }
-  // 1) puerta cercana (casas lujo E)
+  // 1) puerta cercana (casas lujo E) — también caja misteriosa y armas de pared
+  if (typeof tryMysteryBox === 'function' && tryMysteryBox(p)) return;
+  if (typeof tryWallbuy === 'function' && tryWallbuy(p)) return;
   var door = nearestDoor(p.mesh.position, 2.8);
   if (door) { toggleDoor(door); return; }
   var c = nearestCrate(p.mesh.position, 2.5);
   if (c) {
-    if (p.carriedCrate) { toast('Ya llevas caja (I para soltar)'); return; }
+    p.carriedCrates = p.carriedCrates || (p.carriedCrate ? [p.carriedCrate] : []);
+    if (p.carriedCrates.length >= 3) { toast('🎒 Lleno 3/3 — entrega en depósito (lleva ' + p.carriedCrates.join('+') + ')'); return; }
     pickupCrate(p, c); updatePlayerBars(); return;
   }
-  // entregar en depósito
+  // entregar en depósito (entrega las 3)
   for (var i = 0; i < activeShelterKeys.length; i++) {
     var z = ZONES[activeShelterKeys[i]];
     if (z.depot && dist2D(p.mesh.position, z.depot.mesh.position) < 5) {
-      if (p.carriedCrate) { var k = p.carriedCrate; p.carriedCrate = null; if (p.pack) { p.mesh.remove(p.pack); p.pack = null; } applyCrateReward(k); toast('Caja entregada: ' + k); }
-      else toast('Depósito: sin caja');
+      p.carriedCrates = p.carriedCrates || (p.carriedCrate ? [p.carriedCrate] : []);
+      if (p.carriedCrates.length) { deliverCrate(p); updatePlayerBars(); }
+      else toast('Depósito: sin caja (llena 3/3 saqueando casas con puerta 🚪)');
       return;
     }
   }
@@ -536,11 +541,13 @@ function renderWeaponMenu() {
 }
 function renderInv() {
   var p = player(); if (!p) return;
+  p.carriedCrates = p.carriedCrates || (p.carriedCrate ? [p.carriedCrate] : []);
   document.getElementById('inv-body').innerHTML =
     '❤ Salud ' + Math.ceil(p.hp) + '/100 · ⚡ Energía ' + Math.ceil(p.energy) +
     '<br>🔫 ' + WEAPONS[p.weaponKey].name + ' · munición ' + p.ammo +
     '<br>💣 Granadas ' + p.grenades + ' · ⛑ Botiquines ' + p.meds + ' · 🛡 Armadura ' + p.armor +
-    '<br>📦 Caja en espalda: ' + (p.carriedCrate || '—') +
+    '<br>⭐ Puntos CoD: <b>' + (p.points || 0) + '</b> (golpes +10 · bajas +60/100/150 · caja 950 · pared 750/1250)' +
+    '<br>📦 Espalda ' + p.carriedCrates.length + '/3: ' + (p.carriedCrates.join(' + ') || '—') +
     '<br><br>DEPÓSITO — escombro ' + Math.floor(baseResources.scrap) + ' · ammo ' + baseResources.ammo + ' · curas ' + baseResources.med + ' · comida ' + baseResources.food + ' · pesadas ' + baseResources.heavy;
   document.getElementById('btn-close-inv').onclick = closeMenus;
   document.getElementById('btn-use-med').onclick = function () {
@@ -548,7 +555,8 @@ function renderInv() {
     else toast('Sin botiquín o HP lleno');
   };
   document.getElementById('btn-drop-crate').onclick = function () {
-    if (p.carriedCrate) { spawnCrate([p.mesh.position.x + 1, 0, p.mesh.position.z + 1], p.carriedCrate); p.carriedCrate = null; if (p.pack) { p.mesh.remove(p.pack); p.pack = null; } renderInv(); }
+    p.carriedCrates = p.carriedCrates || [];
+    if (p.carriedCrates.length) { var k = p.carriedCrates.pop(); p.carriedCrate = p.carriedCrates[0] || null; spawnCrate([p.mesh.position.x + 1, 0, p.mesh.position.z + 1], k); if (!p.carriedCrates.length && p.pack) { p.mesh.remove(p.pack); p.pack = null; } renderInv(); updatePlayerBars(); }
   };
 }
 function renderDesign() {

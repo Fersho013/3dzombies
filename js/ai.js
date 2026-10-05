@@ -175,20 +175,73 @@ function strafe(s, target, dt) {
   var dx = s.mesh.position.x - target.x, dz = s.mesh.position.z - target.z;
   var l = Math.sqrt(dx * dx + dz * dz) || 1; dx /= l; dz /= l;
   var px = -dz * Math.sin(t), pz = dx * Math.sin(t);
-  s.mesh.position.x += px * edt * 3; s.mesh.position.z += pz * edt * 3;
+  if (typeof tryMoveGround === 'function') tryMoveGround(s.mesh.position, px * edt * 3, pz * edt * 3, 0.5);
+  else { s.mesh.position.x += px * edt * 3; s.mesh.position.z += pz * edt * 3; }
   animateEntityLimbs(s.mesh, edt, 1);
 }
+// moveToward CoD con colisión + rodeo + anti-atasco + abandono de objetivo inalcanzable
 function moveToward(s, target, dt, mul, stopD) {
   var edt = dt * Math.max(1, gameSpeed);
   var dx = target.x - s.mesh.position.x, dz = target.z - s.mesh.position.z;
   var d = Math.sqrt(dx * dx + dz * dz);
-  if (stopD && d < stopD) return;
-  if (d < 0.05) return;
+  if (stopD && d < stopD) { s._stuckT = 0; return true; }
+  if (d < 0.05) { s._stuckT = 0; return true; }
   var sp = (s.isPlayer ? 7 : 4.2) * (mul || 1) * edt;
-  s.mesh.position.x += dx / d * sp; s.mesh.position.z += dz / d * sp;
-  s.mesh.rotation.y = Math.atan2(dx, dz);
+  var nx = dx / d, nzz = dz / d;
+  // rodeo inteligente si hay muro delante
+  if (typeof steerDir === 'function' && !s.isPlayer) {
+    var st = steerDir(s.mesh.position, target.x, target.z, 0.5);
+    nx = st.x; nzz = st.z;
+    if (st.blocked) {
+      // golpeando muro: atacar lo que estorba (puerta/muro) en vez de atascarse
+      s._stuckT = (s._stuckT || 0) + dt;
+      if (s._stuckT > 0.8) { bashBlocking(s); s._stuckT = 0; }
+    }
+  }
+  var moved = 0;
+  if (typeof tryMoveGround === 'function') moved = tryMoveGround(s.mesh.position, nx * sp, nzz * sp, 0.5);
+  else { s.mesh.position.x += nx * sp; s.mesh.position.z += nzz * sp; moved = sp; }
+  s.mesh.rotation.y = Math.atan2(nx, nzz);
   animateEntityLimbs(s.mesh, dt, 1);
-  if (!s.isPlayer) { s.energy = Math.max(0, s.energy - dt * 2); }
+  if (!s.isPlayer) s.energy = Math.max(0, s.energy - dt * 2);
+  // anti-atasco: si no avanza hacia el objetivo, rodeo lateral y luego nuevo objetivo
+  s._lastD = s._lastD === undefined ? d : s._lastD;
+  if (moved < sp * 0.25) {
+    s._stuckT = (s._stuckT || 0) + dt;
+    // desvío lateral inmediato
+    var side = (s._side || 1);
+    if (typeof tryMoveGround === 'function') tryMoveGround(s.mesh.position, -nzz * side * sp, nx * side * sp, 0.5);
+    if (s._stuckT > 1.4) { s._side = -side; s._stuckT = 0.6; }
+    if (s._stuckT > 3 && !s.isPlayer) {
+      // objetivo inalcanzable → buscar nuevo objetivo (otra caja/patrulla) y micro-teleport anti-softlock
+      s._stuckT = 0; s.targetCrate = null;
+      if (typeof tryMoveGround === 'function') tryMoveGround(s.mesh.position, rand(-2, 2), rand(-2, 2), 0.5);
+      setThought(s, '↩ rodeo');
+      return 'stuck';
+    }
+  } else {
+    s._stuckT = Math.max(0, (s._stuckT || 0) - dt * 2);
+    if (d < s._lastD - 0.02) s._side = s._side || 1;
+  }
+  s._lastD = d;
+  return moved;
+}
+// golpear lo que bloquea el paso (puerta cerrada/muro) en vez de quedarse quieto
+function bashBlocking(s) {
+  var bp = s.mesh.position;
+  var best = null, bd = 2.6;
+  for (var i = 0; i < doors.length; i++) {
+    var dr = doors[i];
+    if (dr.open) continue;
+    var dd = dist2D(bp, dr.mesh.position);
+    if (dd < bd) { bd = dd; best = dr; }
+  }
+  if (best) { toggleDoor(best); setThought(s, '🚪'); return; }
+  for (var j = 0; j < destructibles.length; j++) {
+    var d = destructibles[j];
+    if (d.dead || d.name === 'MALL') continue;
+    if (dist2D(bp, d.mesh.position) < 2.4) { damageDestructible(d, 25); setThought(s, '💥 aparta!'); break; }
+  }
 }
 function faceToward(s, target) { s.mesh.rotation.y = Math.atan2(target.x - s.mesh.position.x, target.z - s.mesh.position.z); }
 // focus fire: titán > bruto > rastrero cercano (todos focusean al mismo gordo)
@@ -326,9 +379,24 @@ function updateZombies(dt) {
     if (d > 1.6) {
       var dx = tgt.pos.x - z.mesh.position.x, dz = tgt.pos.z - z.mesh.position.z;
       var l = Math.sqrt(dx * dx + dz * dz) || 1;
-      z.mesh.position.x += dx / l * z.speed * dt * gameSpeed;
-      z.mesh.position.z += dz / l * z.speed * dt * gameSpeed;
-      z.mesh.rotation.y = Math.atan2(dx, dz);
+      var step = z.speed * dt * gameSpeed;
+      var moved = 0;
+      // rodeo + colisión: la horda fluye por puertas/huecos, no atraviesa
+      if (typeof steerDir === 'function') {
+        var sd = steerDir(z.mesh.position, tgt.pos.x, tgt.pos.z, 0.5);
+        if (typeof tryMoveGround === 'function') moved = tryMoveGround(z.mesh.position, sd.x / (Math.sqrt(sd.x * sd.x + sd.z * sd.z) || 1) * step, sd.z / (Math.sqrt(sd.x * sd.x + sd.z * sd.z) || 1) * step, 0.5);
+        else { z.mesh.position.x += dx / l * step; z.mesh.position.z += dz / l * step; moved = step; }
+        z.mesh.rotation.y = Math.atan2(sd.x, sd.z);
+        // si el muro lo frena, morderlo
+        if (moved < step * 0.3) {
+          z._bashT = (z._bashT || 0) + dt;
+          if (z._bashT > 0.7 && z.atkCd <= 0) { z._bashT = 0; z.atkCd = 1.1; zombieAttack(z, tgt); }
+        } else z._bashT = 0;
+      } else {
+        z.mesh.position.x += dx / l * step;
+        z.mesh.position.z += dz / l * step;
+        z.mesh.rotation.y = Math.atan2(dx, dz);
+      }
       animateEntityLimbs(z.mesh, dt, z.speed);
     } else if (z.atkCd <= 0) {
       z.atkCd = 1.1; z.mesh.rotation.y = Math.atan2(tgt.pos.x - z.mesh.position.x, tgt.pos.z - z.mesh.position.z);
@@ -412,6 +480,7 @@ function collapseShelter(zone) {
 }
 function removeStruct(ref, type) {
   scene.remove(ref.mesh);
+  if (typeof removeDynamicSolid === 'function') removeDynamicSolid(ref);
   var arr = type === 'wall' ? walls : barricades;
   arr.splice(arr.indexOf(ref), 1);
 }

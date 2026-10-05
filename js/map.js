@@ -51,15 +51,55 @@ function box(w, h, d, color, x, y, z, ry) {
   m.position.set(x, y, z); if (ry) m.rotation.y = ry; m.castShadow = true; m.receiveShadow = true; scene.add(m); return m;
 }
 function buildZoneMall() {
+  // MALL REFUGIO VIVO estilo CoD: planta abierta con 2 puertas E, pilares, tiendas-loot, enfermería y techo
+  var W = 34, D = 20, H = 6, cx = 0, cz = -14, zF = cz + D / 2; // frente z=-4
   var facade = new THREE.MeshStandardMaterial({ map: TEX.facade, roughness: 0.85 });
-  var main = new THREE.Mesh(new THREE.BoxGeometry(34, 10, 20), facade);
-  main.position.set(0, 5, -14); main.castShadow = main.receiveShadow = true; scene.add(main);
-  destructibles.push({ mesh: main, hp: 1200, maxHp: 1200, name: 'MALL', onDestroy: function (p) { collapseRubble(p, 0x2a3547, 8); } });
-  box(36, 1, 22, 0x0ea5e9, 0, 10.4, -14);
-  var sign = new THREE.Mesh(new THREE.BoxGeometry(16, 2, 0.5), new THREE.MeshBasicMaterial({ color: 0x22d3ee }));
-  sign.position.set(0, 8, -3.8); scene.add(sign);
-  // puerta accesible del mall: interior con loot
-  makeInterior([0, 0, -3], 12, 8, 'MALL');
+  var trimM = new THREE.MeshStandardMaterial({ color: 0xf8fafc, roughness: 0.6 });
+  // losa + techo a 6m (se ve interior) + carteles
+  wallSeg(W + 2, 0.25, D + 2, new THREE.MeshStandardMaterial({ map: TEX.concrete }), cx, 0.12, cz);
+  wallSeg(W + 2, 0.6, D + 2, new THREE.MeshStandardMaterial({ color: 0x0ea5e9, roughness: 0.5 }), cx, H + 0.3, cz);
+  var sign = new THREE.Mesh(new THREE.BoxGeometry(18, 2.2, 0.6), new THREE.MeshBasicMaterial({ color: 0x22d3ee }));
+  sign.position.set(cx, H - 0.6, zF + 0.4); scene.add(sign);
+  var sign2 = new THREE.Mesh(new THREE.BoxGeometry(10, 1.2, 0.4), new THREE.MeshBasicMaterial({ color: 0x10b981 }));
+  sign2.position.set(cx, 4.4, zF + 0.3); scene.add(sign2);
+  // muros con 2 puertas (huecos de 2m en x=-8 y x=+8)
+  function frontSeg(x0, x1) { var w = x1 - x0; wallSeg(w, H, 0.5, facade, (x0 + x1) / 2, H / 2, zF); addSolid((x0 + x1) / 2, zF, w, 0.6, { label: 'MALL' }); }
+  frontSeg(cx - W / 2, cx - 9); frontSeg(cx - 7, cx + 7); frontSeg(cx + 9, cx + W / 2);
+  wallSeg(W, H, 0.5, facade, cx, H / 2, cz - D / 2); addSolid(cx, cz - D / 2, W, 0.6, { label: 'MALL' });
+  wallSeg(0.5, H, D, facade, cx - W / 2, H / 2, cz); addSolid(cx - W / 2, cz, 0.6, D, { label: 'MALL' });
+  wallSeg(0.5, H, D, facade, cx + W / 2, H / 2, cz); addSolid(cx + W / 2, cz, 0.6, D, { label: 'MALL' });
+  // 2 puertas batientes E (CoD: abrir para entrar, cerrar para bloquear horda)
+  [-8, 8].forEach(function (dx, i) {
+    var dm = new THREE.Mesh(new THREE.BoxGeometry(2, 2.8, 0.15), new THREE.MeshStandardMaterial({ color: 0x0c4a6e, roughness: 0.4, metalness: 0.3 }));
+    dm.position.set(cx + dx, 1.4, zF); dm.castShadow = true; scene.add(dm);
+    var d = { mesh: dm, closedX: cx + dx, open: false, label: i === 0 ? 'MALL oeste' : 'MALL este' };
+    d.leafSolid = addSolid(cx + dx, zF, 2, 0.4, { door: d, label: d.label });
+    doors.push(d);
+  });
+  // pilares interiores (cover real, con colisión)
+  [-10, 0, 10].forEach(function (dx) {
+    var pil = wallSeg(1, H, 1, new THREE.MeshStandardMaterial({ map: TEX.concrete }), cx + dx, H / 2, cz);
+    var pilD = { mesh: pil, hp: 500, maxHp: 500, name: 'Pilar MALL' };
+    pilD._solids = [addSolid(cx + dx, cz, 1.2, 1.2, { label: 'Pilar' })];
+    pilD.onDestroy = function (pp) { collapseRubble(pp, 0x64748b, 3); scene.remove(pil); };
+    destructibles.push(pilD);
+  });
+  // interior vivo: enfermería (curas), armería (ammo), cocina (comida), taller (scrap) + camas y luces
+  makeInterior([cx, 0, cz], W - 2, D - 2, 'MALL');
+  wallSeg(6, 0.9, 1, new THREE.MeshStandardMaterial({ color: 0xf8fafc }), cx - 9, 0.65, cz - 6); // mostrador enfermería
+  wallSeg(6, 0.9, 1, new THREE.MeshStandardMaterial({ color: 0x78350f }), cx + 2, 0.65, cz - 6); // armería
+  wallSeg(4, 0.9, 1, new THREE.MeshStandardMaterial({ color: 0xe2e8f0 }), cx + 9, 0.65, cz + 3); // cocina
+  [[-11, 0], [-9, 0]].forEach(function (o) { var bed = wallSeg(2, 0.5, 1.4, new THREE.MeshStandardMaterial({ color: 0xbe123c }), cx + o[0], 0.45, cz + o[1] + 5); });
+  [[-13, -3], [0, -3], [8, 5]].forEach(function (lp) { var li = new THREE.PointLight(0xfde68a, 0.8, 18); li.position.set(cx + lp[0], 4.5, cz + lp[1]); scene.add(li); });
+  var gen = wallSeg(1.4, 1, 0.9, new THREE.MeshStandardMaterial({ color: 0xf59e0b }), cx + 12, 0.7, cz - 7);
+  destructibles.push({ mesh: gen, hp: 200, maxHp: 200, name: 'Generador', onDestroy: function (pp) { explodeAt(pp, 5, 60); scene.remove(gen); } });
+  addDynamicSolid(gen, cx + 12, cz - 7, 1.4, 0.9);
+  spawnCrate([cx - 9, 0, cz - 4], 'curas'); spawnCrate([cx - 7, 0, cz - 4], 'curas');
+  spawnCrate([cx + 2, 0, cz - 4], 'rifle'); spawnCrate([cx + 4, 0, cz - 4], 'armas');
+  spawnCrate([cx + 9, 0, cz + 1], 'comida'); spawnCrate([cx - 2, 0, cz + 4], 'materiales');
+  spawnCrate([cx - 12, 0, cz + 2], 'blindaje');
+  var mallShell = { mesh: sign, hp: 1200, maxHp: 1200, name: 'MALL' };
+  destructibles.push(mallShell);
 }
 function nearestDoor(pos, maxD) {
   var best = null, bd = maxD || 3;
@@ -72,6 +112,8 @@ function toggleDoor(d) {
     d.mesh.rotation.y = d.open ? Math.PI / 1.6 : 0;
     d.mesh.position.x = d.closedX + (d.open ? 0.55 : 0);
   } catch (e) {}
+  // la hoja cerrada bloquea; abierta deja pasar (estilo CoD)
+  if (d.leafSolid) d.leafSolid.dead = d.open;
   playSound('ui'); toast((d.open ? '🚪 Abierta: ' : '🚪 Cerrada: ') + d.label);
   log('🚪 Puerta ' + d.label + (d.open ? ' abierta' : ' cerrada'));
 }
@@ -110,6 +152,14 @@ function buildLuxuryHouse(hx, hz, st, idx) {
   wallSeg(W, H, 0.35, facade, hx, H / 2, hz - D / 2);
   wallSeg(0.35, H, D, facade, hx - W / 2, H / 2, hz);
   wallSeg(0.35, H, D, facade, hx + W / 2, H / 2, hz);
+  // SÓLIDOS con hueco de puerta 1.6m (hay que cruzar por la puerta, no atravesar)
+  var houseSolids = [
+    addSolid(hx - 2.9, zF, 2.9, 0.5, { label: st.label }),
+    addSolid(hx + 2.9, zF, 2.9, 0.5, { label: st.label }),
+    addSolid(hx, hz - D / 2, W, 0.5, { label: st.label }),
+    addSolid(hx - W / 2, hz, 0.5, D, { label: st.label }),
+    addSolid(hx + W / 2, hz, 0.5, D, { label: st.label })
+  ];
   // ventanas con marco + cristal (se puede disparar a través visualmente, bloquean zombies)
   [[hx - 2.9, zF], [hx + 2.9, zF]].forEach(function (ww) {
     wallSeg(1.7, 1.3, 0.1, trimM, ww[0], 1.9, ww[1]);
@@ -121,6 +171,7 @@ function buildLuxuryHouse(hx, hz, st, idx) {
   doorM.position.set(hx, 1.3, zF); doorM.castShadow = true; scene.add(doorM);
   var knob = new THREE.Mesh(new THREE.SphereGeometry(0.07), new THREE.MeshBasicMaterial({ color: 0xfacc15 })); knob.position.set(0.55, 0, 0.1); doorM.add(knob);
   var door = { mesh: doorM, closedX: hx, open: false, label: st.label };
+  door.leafSolid = addSolid(hx, zF, 1.6, 0.35, { door: door, label: st.label });
   doors.push(door);
   // techo + chimenea
   var roof = new THREE.Mesh(new THREE.ConeGeometry(7.2, 2.4, 4), new THREE.MeshStandardMaterial({ color: st.roof, roughness: 0.8 }));
@@ -156,6 +207,7 @@ function buildLuxuryHouse(hx, hz, st, idx) {
   spawnCrate([hx + 2.5, 0, hz - 0.5], ['rifle', 'escopeta', 'sniper', 'granadas'][idx % 4]);
   if (idx % 2 === 0) spawnCrate([hx, 0, hz + 0.4], 'blindaje'); else spawnCrate([hx, 0, hz + 0.4], 'curas');
   var H = { mesh: slab, hp: 900, maxHp: 900, name: st.label, onDestroy: function (pp) { collapseRubble(pp, st.wall, 6); } };
+  H._solids = houseSolids.concat([door.leafSolid]);
   destructibles.push(H);
 }
 function makeInterior(center, w, d, label) {
@@ -213,7 +265,9 @@ function buildZoneParking() {
       hl.position.set(2.02, 0.9, 0); g.add(hl);
       g.position.set(p[0] - 13 + i * 5.2, 0, p[2] - 6 + (i % 2) * 10);
       scene.add(g);
-      destructibles.push({ mesh: g, hp: 220, maxHp: 220, name: 'Coche', explosive: true, onDestroy: function (pp) { explodeAt(pp, 7, 110); collapseRubble(pp, 0x27272a, 5); scene.remove(g); } });
+      var carD = { mesh: g, hp: 220, maxHp: 220, name: 'Coche', explosive: true, onDestroy: function (pp) { explodeAt(pp, 7, 110); collapseRubble(pp, 0x27272a, 5); scene.remove(g); } };
+      carD._solids = [addSolid(g.position.x, g.position.z, 4.2, 2.1, { label: 'Coche' })];
+      destructibles.push(carD);
     })(i);
   }
 }
@@ -227,7 +281,12 @@ function buildStreetProps() {
       lamp.position.set(x, 7.1, z); scene.add(lamp);
       var pl = new THREE.PointLight(0xfde68a, 0.55, 26); pl.position.copy(lamp.position); scene.add(pl);
       lampsFlicker.push({ light: pl, seed: Math.random() * 10 });
-      destructibles.push({ mesh: pole, hp: 80, maxHp: 80, name: 'Farola', onDestroy: function () { scene.remove(lamp); scene.remove(pl); scene.remove(pole); } });
+      var poleD = { mesh: pole, hp: 80, maxHp: 80, name: 'Farola', onDestroy: function () { scene.remove(lamp); scene.remove(pl); scene.remove(pole); } };
+      poleD._solids = [addSolid(x, z, 0.5, 0.5, { label: 'Farola' })];
+      // al caer la farola, liberar paso
+      var _oldPole = poleD.onDestroy;
+      poleD.onDestroy = function () { _oldPole(); if (poleD._solids) poleD._solids.forEach(function (s) { s.dead = true; }); };
+      destructibles.push(poleD);
     })();
   }
 }
@@ -239,7 +298,9 @@ function spawnExplosiveBarrels() {
       m.position.set(x, 0.6, z); m.castShadow = true; scene.add(m);
       var band = new THREE.Mesh(new THREE.CylinderGeometry(0.52, 0.52, 0.2, 12), new THREE.MeshBasicMaterial({ color: 0xfacc15 }));
       band.position.y = 0.2; m.add(band);
-      destructibles.push({ mesh: m, hp: 40, maxHp: 40, name: 'Barril', explosive: true, onDestroy: function (pp) { explodeAt(pp, 8, 140); scene.remove(m); } });
+      var barD = { mesh: m, hp: 40, maxHp: 40, name: 'Barril', explosive: true, onDestroy: function (pp) { explodeAt(pp, 8, 140); scene.remove(m); } };
+      barD._solids = [addSolid(x, z, 1, 1, { label: 'Barril' })];
+      destructibles.push(barD);
     })();
   }
 }
@@ -257,6 +318,8 @@ function damageDestructible(d, dmg) {
   if (Math.random() < 0.4) spawnImpactFX(d.mesh.position, 0x9ca3af);
   if (d.hp <= 0 && !d.dead) {
     d.dead = true;
+    if (d._solids) d._solids.forEach(function (s) { s.dead = true; });
+    if (d._solid) d._solid.dead = true;
     var pp = d.mesh.position.clone ? d.mesh.position.clone() : new THREE.Vector3(d.mesh.position.x, 0, d.mesh.position.z);
     if (d.onDestroy) d.onDestroy(pp);
     var idx = destructibles.indexOf(d); if (idx >= 0) destructibles.splice(idx, 1);
@@ -280,6 +343,79 @@ var CRATE_KINDS = ['rifle', 'escopeta', 'sniper', 'granadas', 'curas', 'comida',
 function spawnInitialCrates(n) {
   for (var i = 0; i < (n || 14); i++) spawnCrate([rand(-80, 80), 0, rand(-80, 80)], CRATE_KINDS[Math.floor(Math.random() * CRATE_KINDS.length)]);
 }
+// ===== FÍSICA COLISIONES estilo CoD: todo sólido, puertas con hueco, deslizamiento =====
+var staticSolids = [];   // AABB fijas mapa {x1,z1,x2,z2,dead,door,label}
+var dynamicSolids = [];  // muros/torretas/depósitos construidos {x1..,ref,dead}
+function addSolid(cx, cz, w, d, opts) {
+  var s = { x1: cx - w / 2, z1: cz - d / 2, x2: cx + w / 2, z2: cz + d / 2, dead: false };
+  if (opts) for (var k in opts) s[k] = opts[k];
+  staticSolids.push(s); return s;
+}
+function addDynamicSolid(ref, cx, cz, w, d) {
+  var s = { x1: cx - w / 2, z1: cz - d / 2, x2: cx + w / 2, z2: cz + d / 2, dead: false, ref: ref };
+  dynamicSolids.push(s); ref._solid = s; return s;
+}
+function removeDynamicSolid(ref) { if (ref && ref._solid) ref._solid.dead = true; }
+function allSolids() { return staticSolids.concat(dynamicSolids); }
+// círculo vs AABB: empuja fuera por el eje de menor penetración (desliza como CoD)
+function resolveCircle(pos, radius) {
+  var hit = false;
+  var solids = allSolids();
+  for (var i = 0; i < solids.length; i++) {
+    var s = solids[i];
+    if (s.dead) continue;
+    if (s.door && s.door.open) continue; // puerta abierta = paso libre
+    var cx = clamp(pos.x, s.x1, s.x2), cz = clamp(pos.z, s.z1, s.z2);
+    var dx = pos.x - cx, dz = pos.z - cz;
+    var d2 = dx * dx + dz * dz;
+    if (d2 < radius * radius) {
+      hit = true;
+      if (d2 > 1e-6) {
+        var d = Math.sqrt(d2), push = radius - d;
+        pos.x += dx / d * push; pos.z += dz / d * push;
+      } else {
+        // centro dentro: expulsar por el lado más cercano
+        var l = pos.x - s.x1, r = s.x2 - pos.x, t = pos.z - s.z1, b = s.z2 - pos.z;
+        var m = Math.min(l, r, t, b);
+        if (m === l) pos.x = s.x1 - radius; else if (m === r) pos.x = s.x2 + radius;
+        else if (m === t) pos.z = s.z1 - radius; else pos.z = s.z2 + radius;
+      }
+    }
+  }
+  return hit;
+}
+// mover con colisión por ejes (permite deslizar por paredes y colarse por puertas)
+function tryMoveGround(pos, dx, dz, radius) {
+  radius = radius || 0.5;
+  var ox = pos.x, oz = pos.z;
+  pos.x += dx; resolveCircle(pos, radius);
+  pos.z += dz; resolveCircle(pos, radius);
+  pos.x = clamp(pos.x, -106, 106); pos.z = clamp(pos.z, -106, 106);
+  return Math.sqrt((pos.x - ox) * (pos.x - ox) + (pos.z - oz) * (pos.z - oz));
+}
+function pointBlocked(x, z, radius) {
+  var p = { x: x, z: z };
+  var solids = allSolids();
+  for (var i = 0; i < solids.length; i++) {
+    var s = solids[i]; if (s.dead) continue; if (s.door && s.door.open) continue;
+    var cx = clamp(x, s.x1, s.x2), cz = clamp(z, s.z1, s.z2);
+    var dx = x - cx, dz = z - cz;
+    if (dx * dx + dz * dz < (radius || 0.5) * (radius || 0.5)) return true;
+  }
+  return false;
+}
+// dirección con rodeo: si el camino recto choca, prueba ±40° y ±80° (rápido, sin A*)
+function steerDir(pos, tx, tz, radius) {
+  var dx = tx - pos.x, dz = tz - pos.z;
+  var base = Math.atan2(dx, dz);
+  var cands = [0, 0.7, -0.7, 1.4, -1.4, 2.4, -2.4];
+  for (var i = 0; i < cands.length; i++) {
+    var a = base + cands[i];
+    var px = pos.x + Math.sin(a) * 1.6, pz = pos.z + Math.cos(a) * 1.6;
+    if (!pointBlocked(px, pz, radius)) return { x: Math.sin(a), z: Math.cos(a), angled: cands[i] !== 0 };
+  }
+  return { x: dx / (Math.sqrt(dx * dx + dz * dz) || 1), z: dz / (Math.sqrt(dx * dx + dz * dz) || 1), angled: false, blocked: true };
+}
 function spawnCrate(pos, kind) {
   var g = new THREE.Group();
   var col = kind === 'materiales' ? 0xf59e0b : kind === 'curas' ? 0xef4444 : kind === 'pesadas' ? 0x7c3aed : 0x10b981;
@@ -291,5 +427,7 @@ function spawnCrate(pos, kind) {
   var glow = new THREE.Mesh(new THREE.BoxGeometry(1.06, 0.1, 1.06), new THREE.MeshBasicMaterial({ color: col }));
   glow.position.y = 0.12; g.add(glow);
   g.position.set(pos[0], 0, pos[2]); scene.add(g);
+  // nunca dentro de un muro: empujar fuera para que sea alcanzable por la puerta
+  if (typeof resolveCircle === 'function') resolveCircle(g.position, 0.8);
   crates.push({ mesh: g, pos: g.position, kind: kind, taken: false, bob: Math.random() * 6 });
 }

@@ -61,7 +61,8 @@ function setupPlayerControls() {
     if (k === 't') rallyAllies();
     if (k === 'x') hammerHelp();
     if (k === 'z') toggleTower();
-    if (k === 'v') { viewMode = viewMode === 'fps' ? 'tps' : 'fps'; toast('Vista: ' + viewMode.toUpperCase()); }
+    if (k === 'r') playerReload();
+    if (k === 'v') { viewMode = viewMode === 'fps' ? 'tps' : 'fps'; toast('Vista: ' + viewMode.toUpperCase()); playSound('ui'); }
     if (k === 'escape') closeMenus();
   });
   window.addEventListener('keyup', function (e) {
@@ -123,15 +124,22 @@ function updatePlayer(dt) {
   var vx = fx * (playerInput.f ? 1 : 0) + fx * -1 * (playerInput.b ? 1 : 0) + rx * mx;
   var vz = fz * (playerInput.f ? 1 : 0) + fz * -1 * (playerInput.b ? 1 : 0) + rz * mx;
   var l = Math.sqrt(vx * vx + vz * vz);
+  p.bobT = (p.bobT || 0);
   if (l > 0) {
     p.mesh.position.x += vx / l * sp * dt * gameSpeed;
     p.mesh.position.z += vz / l * sp * dt * gameSpeed;
     p.mesh.rotation.y = p.yaw + Math.PI;
     animateEntityLimbs(p.mesh, dt, 1.4);
     p.energy = Math.max(0, p.energy - (playerInput.sprint ? 8 : 2) * dt);
-  } else p.energy = Math.min(100, p.energy + 10 * dt);
+    // headbob + pasos
+    p.bobT += dt * (playerInput.sprint ? 11 : 8);
+    p.stepT -= dt * gameSpeed;
+    if (p.stepT <= 0) { p.stepT = playerInput.sprint ? 0.3 : 0.45; playSound('step'); }
+  } else { p.energy = Math.min(100, p.energy + 10 * dt); }
   p.mesh.position.x = clamp(p.mesh.position.x, -105, 105);
   p.mesh.position.z = clamp(p.mesh.position.z, -105, 105);
+  // interior: avisar casa accesible
+  try { var inn = insideInterior(p.mesh.position); if (inn && inn._last !== Math.floor(performance.now() / 5000)) { inn._last = Math.floor(performance.now() / 5000); } } catch (e) {}
   // cámara FPS/TPS o torre MG
   if (p.towerOp) {
     var np = p.towerOp.mesh.position;
@@ -151,8 +159,12 @@ function updatePlayer(dt) {
   }
   if (viewmodel) viewmodel.visible = (viewMode === 'fps');
   p.mesh.visible = (viewMode === 'tps') || cameraMode !== 'follow';
+  var bobY = Math.sin(p.bobT || 0) * (l > 0 ? (playerInput.ads ? 0.008 : 0.025) : 0);
+  var bobX = Math.cos((p.bobT || 0) * 0.5) * (l > 0 ? 0.012 : 0);
+  // recarga
+  if (p.reloadT > 0) { p.reloadT -= dt * gameSpeed; if (p.reloadT <= 0) { var need = 30 - p.ammo; var take = Math.min(need, baseResources.ammo); p.ammo += take; baseResources.ammo -= take; toast('🔫 Recargado'); } }
   if (viewMode === 'fps') {
-    camera.position.set(p.mesh.position.x, 1.7, p.mesh.position.z);
+    camera.position.set(p.mesh.position.x + bobX, 1.7 + bobY, p.mesh.position.z);
     camera.rotation.set(0, 0, 0);
     camera.rotation.order = 'YXZ'; camera.rotation.y = p.yaw; camera.rotation.x = p.pitch;
     p.mesh.visible = false;
@@ -163,11 +175,14 @@ function updatePlayer(dt) {
     p.mesh.visible = true;
   }
   // disparo arma propia (MG si opera ya tratado)
-  if (playerInput.fire && playerFireCd <= 0 && p.towerOp === null) {
+  if (playerInput.fire && playerFireCd <= 0 && p.towerOp === null && !(p.reloadT > 0)) {
     var w = WEAPONS[p.weaponKey];
-    if (p.ammo <= 0) { if (baseResources.ammo > 0) { baseResources.ammo -= 10; p.ammo += 10; toast('Recargado'); } else { playerInput.fire = false; return; } }
+    if (p.ammo <= 0) { playerReload(); playerInput.fire = false; return; }
     playerFireCd = w.cd; p.ammo--;
     playSound('gun', { weapon: p.weaponKey });
+    addShake(p.weaponKey === 'shotgun' ? 0.35 : p.weaponKey === 'sniper' ? 0.4 : 0.12);
+    ejectShell(p.mesh.position, p.yaw);
+    if (viewmodel) { viewmodel.position.z = -0.42; setTimeout(function () { if (viewmodel) viewmodel.position.z = -0.5; }, 60); }
     var range = w.range * (playerInput.ads ? 1.25 : 1);
     var dir2 = new THREE.Vector3(); camera.getWorldDirection(dir2);
     var pellets = w.pellets || 1;
@@ -177,8 +192,9 @@ function updatePlayer(dt) {
       var hit2 = raycastZombie(camera.position, d2, range);
       fireBullet(camera.position, hit2.point, range, 0, p);
       if (hit2.z) damageZombie(hit2.z, rand(w.dmg[0], w.dmg[1]), p);
+      else hitDestructible(camera.position, d2, range, rand(w.dmg[0], w.dmg[1]));
     }
-    createMuzzleFlash(p.mesh.position, p.yaw + Math.PI);
+    createMuzzleFlash(p.mesh.position, p.yaw + Math.PI, p.weaponKey === 'shotgun' || p.weaponKey === 'sniper');
   }
   // curación con F (canalizada)
   if (playerHealTarget) {
@@ -216,6 +232,24 @@ function raycastZombie(origin, dir, range) {
     if (perp < 1.1 && t < bd) { bd = t; best = z; end = zp.clone(); }
   });
   return { z: best, point: end };
+}
+function hitDestructible(origin, dir, range, dmg) {
+  var best = null, bd = range;
+  destructibles.forEach(function (d) {
+    if (d.dead) return;
+    var zp = d.mesh.position.clone(); zp.y = 1;
+    var to = zp.clone().sub(origin);
+    var t = to.dot(dir);
+    if (t < 0 || t > range) return;
+    var perp = origin.clone().add(dir.clone().multiplyScalar(t)).distanceTo(zp);
+    if (perp < 1.6 && t < bd) { bd = t; best = d; }
+  });
+  if (best) { damageDestructible(best, dmg); spawnImpactFX(best.mesh.position, 0xfde68a); }
+}
+function playerReload() {
+  var p = player(); if (!p || p.reloadT > 0) return;
+  if (p.ammo >= 30 || baseResources.ammo <= 0) return;
+  p.reloadT = 1.6; playSound('reload'); toast('🔄 Recargando… [R]');
 }
 function playerThrowGrenade() { var p = player(); if (!p || p.grenades <= 0) { toast('Sin granadas'); return; } if (p.nadeCd > 0) return; p.nadeCd = 2; var dir = new THREE.Vector3(); camera.getWorldDirection(dir); var tp = p.mesh.position.clone().add(dir.multiplyScalar(12)); throwGrenade(p, tp); }
 function playerStartHeal() {

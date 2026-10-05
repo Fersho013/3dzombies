@@ -58,18 +58,40 @@ function nearestZombie(pos, maxD) {
 }
 function nearestAliveAlly(s, maxD) {
   var best = null, bd = maxD;
-  survivors.forEach(function (o) { if (o === s || !o.alive) return; var d = dist2D(s.mesh.position, o.mesh.position); if (d < bd) { bd = d; best = o; } });
+  survivors.forEach(function (o) { if (o === s || !o.alive || o.downed) return; var d = dist2D(s.mesh.position, o.mesh.position); if (d < bd) { bd = d; best = o; } });
   return best;
 }
-// ---- IA SUPERVIVIENTES ----
+// ---- IA SUPERVIVIENTES TÁCTICA Warzone: ráfagas, focus, cobertura, reanimar ----
 function updateSurvivorAI(s, dt) {
   if (!s.alive || s.isPlayer || s.towerOp) return;
-  s.cd -= dt * gameSpeed; s.nadeCd -= dt * gameSpeed; s.healCd -= dt * gameSpeed;
+  if (s.downed) { // desangrándose 30s
+    s.reviveT -= dt * gameSpeed;
+    if (Math.floor(s.reviveT) % 5 === 0 && Math.random() < dt) setThought(s, '¡Ayuda! ' + Math.ceil(s.reviveT) + 's');
+    if (s.reviveT <= 0) { s.downed = false; s.alive = false; s.hp = 0; try { s.mesh.rotation.x = -Math.PI / 2; } catch (e) {} log('☠ ' + s.name + ' desangrado'); checkGameOver(); }
+    return;
+  }
+  if (s.mag === undefined) { s.mag = WEAPONS[s.weaponKey].mag; s.burst = 0; s.burstPause = 0; s.crouchT = 0; }
+  s.cd -= dt * gameSpeed; s.nadeCd -= dt * gameSpeed; s.healCd -= dt * gameSpeed; s.burstPause -= dt * gameSpeed;
+  if (s.meleeCd) s.meleeCd -= dt * gameSpeed;
   var pos = s.mesh.position;
-  // contar amenaza local
-  var near = 0, nz = nearestZombie(pos, 30);
+  // 0) REANIMAR: máxima prioridad (como Warzone ping + humo)
+  var down = null, bd0 = 30;
+  survivors.forEach(function (o) { if (o === s || !o.alive || !o.downed) return; var d = dist2D(pos, o.mesh.position); if (d < bd0) { bd0 = d; down = o; } });
+  if (down) {
+    s.state = 'REVIVE';
+    moveToward(s, down.mesh.position, dt, 1.15, 2.2);
+    if (dist2D(pos, down.mesh.position) < 2.6) {
+      down.hp = Math.min(60, down.hp + 22 * dt * gameSpeed);
+      setThought(s, '🚑 ' + down.name);
+      if (Math.random() < dt * 2) spawnHealFX(down.mesh.position);
+      if (down.hp >= 60) reviveSurvivor(down);
+    }
+    return;
+  }
+  // contar amenaza local + focus titán (focus fire)
+  var near = 0, nz = priorityTarget(pos);
   zombies.forEach(function (z) { if (z.alive && dist2D(pos, z.mesh.position) < 12) near++; });
-  var garrison = survivors.filter(function (o) { return o.alive && dist2D(pos, o.mesh.position) < 15; }).length;
+  var garrison = survivors.filter(function (o) { return o.alive && !o.downed && dist2D(pos, o.mesh.position) < 15; }).length;
   // HUIR: >5 zombies y >2.6x guarnición
   if (near > 5 && near > garrison * 2.6) {
     s.state = 'FLEE';
@@ -79,9 +101,10 @@ function updateSurvivorAI(s, dt) {
     if (s.hp < 60) healSelf(s, dt);
     return;
   }
-  // CURAR: aliado crítico cerca (Elena prioriza)
+  // CURAR: aliado crítico cerca (Elena prioriza) + auto-placa si tiene
+  if ((s.armorHP || 0) <= 0 && baseResources.armor > 0 && near === 0 && (s.plates || 0) < 1) { baseResources.armor--; s.plates = (s.plates || 0) + 1; s.armorHP = 50; setThought(s, '🛡 placa'); }
   var hurt = nearestAliveAlly(s, 12);
-  if (hurt && hurt.hp < 55 && (s.name === 'Elena' || s.healCd <= 0)) {
+  if (hurt && !hurt.downed && hurt.hp < 55 && (s.name === 'Elena' || s.healCd <= 0)) {
     moveToward(s, hurt.mesh.position, dt, 1.0, 2.2);
     if (dist2D(pos, hurt.mesh.position) < 3) {
       hurt.hp = Math.min(hurt.maxHp, hurt.hp + s.healRate * dt * gameSpeed);
@@ -91,27 +114,34 @@ function updateSurvivorAI(s, dt) {
     return;
   }
   if (s.hp < 45 && baseResources.med > 0) { healSelf(s, dt); return; }
-  // COMBATIR con kiteo
+  // COMBATIR táctico: distancia ideal por arma + strafe + agacharse + ráfagas
   var w = WEAPONS[s.weaponKey];
-  var adsBonus = 1;
   if (nz.z) {
     s.state = isWaveActive ? 'DEFEND_BASE' : 'SCAVENGE';
     var d = nz.d;
-    if (d > w.range) { moveToward(s, nz.z.mesh.position, dt, 1.0); }
-    else if (d < w.range * 0.35) { // kiteo: alejarse
+    var ideal = w.range * (s.weaponKey === 'sniper' ? 0.8 : s.weaponKey === 'shotgun' ? 0.4 : 0.6);
+    if (d > w.range) { moveToward(s, nz.z.mesh.position, dt, 1.0); s.crouchT = 0; }
+    else if (d < ideal * 0.5) { // kiteo: alejarse
       var dx = pos.x - nz.z.mesh.position.x, dz = pos.z - nz.z.mesh.position.z;
       var l = Math.sqrt(dx * dx + dz * dz) || 1;
       moveToward(s, { x: pos.x + dx / l * 5, z: pos.z + dz / l * 5 }, dt, 1.0);
-    } else { strafe(s, nz.z.mesh.position, dt); }
+    } else {
+      strafe(s, nz.z.mesh.position, dt);
+      // agacharse para precisión si lejos y a salvo (como Warzone mount)
+      s.crouchT = (d > 10 && near < 2) ? 1 : 0;
+      try { s.mesh.scale.y += ((s.crouchT ? 0.75 : 1) - s.mesh.scale.y) * Math.min(1, dt * 6); } catch (e) {}
+    }
     faceToward(s, nz.z.mesh.position);
+    // melee si encima (cuchillo)
+    if (d < 2.2 && (s.meleeCd || 0) <= 0) { s.meleeCd = 0.8; damageZombie(nz.z, 45, s); playSound('hit'); }
     // granada a grupos
-    if (s.grenades > 0 && s.nadeCd <= 0 && near >= 3 && d < 20) { throwGrenade(s, nz.z.mesh.position); s.nadeCd = 6; }
-    // bazuka Marcus
+    if (s.grenades > 0 && s.nadeCd <= 0 && near >= 3 && d < 20) { throwGrenade(s, nz.z.mesh.position); s.nadeCd = 6; setThought(s, '💣 fuera!'); }
+    // bazuka Marcus a titán
     if (s.bazooka && baseResources.heavy > 0 && nz.z.kind === 'titan' && s.cd <= 0) {
       baseResources.heavy--; s.cd = 3;
       fireMissileAt(pos, nz.z, 120, s);
-    } else if (s.cd <= 0 && d <= w.range * 1.0) {
-      npcShoot(s, nz.z, w);
+    } else if (s.cd <= 0 && s.burstPause <= 0 && d <= w.range) {
+      npcShootBurst(s, nz.z, w, d);
     }
     return;
   }
@@ -161,18 +191,42 @@ function moveToward(s, target, dt, mul, stopD) {
   if (!s.isPlayer) { s.energy = Math.max(0, s.energy - dt * 2); }
 }
 function faceToward(s, target) { s.mesh.rotation.y = Math.atan2(target.x - s.mesh.position.x, target.z - s.mesh.position.z); }
-function npcShoot(s, z, w) {
+// focus fire: titán > bruto > rastrero cercano (todos focusean al mismo gordo)
+function priorityTarget(pos) {
+  var best = null, bd = 1e9, bk = -1;
+  var prio = { titan: 3, brute: 2, crawler: 1 };
+  for (var i = 0; i < zombies.length; i++) {
+    var z = zombies[i]; if (!z.alive) continue;
+    var d = dist2D(pos, z.mesh.position);
+    if (d > 34) continue;
+    var score = (prio[z.kind] || 0) * 100 - d;
+    if (!best || (prio[z.kind] > bk) || (prio[z.kind] === bk && d < bd)) { best = z; bd = d; bk = prio[z.kind]; }
+  }
+  return { z: best, d: bd };
+}
+function npcShoot(s, z, w) { npcShootBurst(s, z, w, dist2D(s.mesh.position, z.mesh.position)); }
+function npcShootBurst(s, z, w, dist) {
+  // ráfagas Warzone: 4 tiros SMG/rifle, 1 sniper/escopeta, pausa control retroceso
+  if ((s.mag || 0) <= 0) {
+    if (baseResources.ammo > 0) { var take = Math.min(w.mag, baseResources.ammo); baseResources.ammo -= take; s.mag = take; s.ammo = take; s.burstPause = w.reload * 0.5; setThought(s, '🔄 recargando'); playSound('reload'); }
+    else return;
+  }
+  var burstLen = s.weaponKey === 'sniper' ? 1 : s.weaponKey === 'shotgun' ? 1 : s.weaponKey === 'smg' ? 5 : 4;
+  s.burst = (s.burst || 0) + 1;
   s.cd = w.cd;
-  if (s.ammo <= 0) { if (baseResources.ammo > 0) { baseResources.ammo -= 10; s.ammo += 10; } else return; }
-  s.ammo--;
+  s.mag--; s.ammo = s.mag;
   playSound('gun', { weapon: s.weaponKey });
   createMuzzleFlash(s.mesh.position, s.mesh.rotation.y);
+  // precisión NPC por distancia + agachado + arma (simula ADS)
+  var acc = s.weaponKey === 'sniper' ? 0.95 : s.weaponKey === 'shotgun' ? (dist < 8 ? 0.9 : 0.5) : clamp(1 - dist / (w.range * 1.6), 0.35, 0.92);
+  if (s.crouchT) acc = Math.min(0.95, acc + 0.12);
+  if (Math.random() > acc) { if (s.burst >= burstLen) { s.burst = 0; s.burstPause = s.weaponKey === 'sniper' ? 1.1 : 0.45; } return; }
   var pellets = w.pellets || 1;
   for (var i = 0; i < pellets; i++) {
-    var dmg = rand(w.dmg[0], w.dmg[1]);
-    damageZombie(z, dmg, s);
+    damageZombie(z, warzoneDamage(w, dist), s);
     if (!z.alive) break;
   }
+  if (s.burst >= burstLen) { s.burst = 0; s.burstPause = s.weaponKey === 'smg' ? 0.35 : s.weaponKey === 'sniper' ? 1.2 : 0.5; }
 }
 function healSelf(s, dt) {
   if (baseResources.med <= 0) return;
@@ -203,16 +257,25 @@ function deliverCrate(s) {
   setThought(s, 'entregado ✓');
 }
 function applyCrateReward(k) {
-  if (k === 'materiales') baseResources.scrap = Math.min(1000, baseResources.scrap + rand(15, 30));
-  else if (k === 'curas') baseResources.med += 2;
-  else if (k === 'comida') baseResources.food += 3;
-  else if (k === 'granadas') survivors.forEach(function (s) { if (s.alive) s.grenades = Math.min(5, s.grenades + 1); });
-  else if (k === 'pesadas') baseResources.heavy += 2;
-  else if (k === 'blindaje') baseResources.armor += 2;
-  else if (k === 'armas' || k === 'rifle') baseResources.ammo += 30;
-  else if (k === 'escopeta') baseResources.ammo += 16;
-  else if (k === 'sniper') baseResources.ammo += 10;
+  // TODO con propósito temático (nada es decorativo):
+  if (k === 'materiales') { baseResources.scrap = Math.min(1000, baseResources.scrap + rand(15, 30)); toast('🧱 Escombro → construir/reparar'); }
+  else if (k === 'curas') { baseResources.med += 2; toast('⛑ Botiquines → curar [F] / reanimar'); }
+  else if (k === 'comida') { baseResources.food += 3; survivors.forEach(function (s) { if (s.alive && s.isPlayer) s.hunger = Math.min(100, (s.hunger || 80) + 12); }); toast('🍖 Comida → hambre/energía/vida [5]'); }
+  else if (k === 'granadas') { survivors.forEach(function (s) { if (s.alive) s.grenades = Math.min(5, s.grenades + 1); }); toast('💣 Letal → [Q] / LB mando'); }
+  else if (k === 'pesadas') { baseResources.heavy += 2; toast('🚀 Pesadas → bazooka Marcus + misiles'); }
+  else if (k === 'blindaje') { baseResources.armor += 2; toast('🛡 Placas → [4] 50 blindaje c/u'); }
+  else if (k === 'melee') { baseResources.meleeLvl = (baseResources.meleeLvl || 0) + 1; baseResources.ammo += 8; toast('🔪 Cuchillo +15% → [H]'); }
+  else if (k === 'armas' || k === 'rifle') { baseResources.ammo += 30; unlockForAll('rifle'); }
+  else if (k === 'escopeta') { baseResources.ammo += 16; unlockForAll('shotgun'); }
+  else if (k === 'sniper') { baseResources.ammo += 10; unlockForAll('sniper'); }
   else baseResources.ammo += 20;
+}
+function unlockForAll(wk) {
+  survivors.forEach(function (s) {
+    if (!s.alive) return;
+    s.slots = s.slots || [s.weaponKey, 'pistol'];
+    if (s.slots.indexOf(wk) < 0 && s.slots.length < 3) { s.slots.push(wk); if (s.isPlayer) toast('🔓 Desbloqueada: ' + WEAPONS[wk].name + ' [1/2]'); }
+  });
 }
 function helpConstruction(s, dt) {
   // buscar obra activa (torre andamio o outpost work)
@@ -307,13 +370,31 @@ function zombieAttack(z, tgt) {
 }
 function damageSurvivor(s, dmg) {
   if (!s.alive) return;
-  if (s.armor > 0) { var ab = Math.min(s.armor * 10, dmg); dmg -= ab; }
+  if (s.downed) { s.hp -= dmg * 0.4; if (s.hp <= -30) { s.downed = false; s.alive = false; s.hp = 0; try { s.mesh.rotation.x = -Math.PI / 2; } catch (e) {} log('☠ ' + s.name + ' rematado'); killfeed('☠ ' + s.name + ' rematado'); checkGameOver(); } return; }
+  // placas estilo Warzone absorben primero (50 por placa)
+  if ((s.armorHP || 0) > 0) { var ab2 = Math.min(s.armorHP, dmg); s.armorHP -= ab2; dmg -= ab2; spawnImpactFX(s.mesh.position, 0x93c5fd); if (s.armorHP <= 0 && (s.plates || 0) > 0) { s.plates--; if (s.armorHP < 0) { s.hp += s.armorHP; s.armorHP = 0; } toast('🛡 Placa rota ' + s.name); } if (dmg <= 0) { flashHit(s); return; } }
+  else if (s.armor > 0) { var ab = Math.min(s.armor * 10, dmg); dmg -= ab; }
   s.hp -= dmg;
   flashHit(s);
   spawnBlood(s.mesh.position, false);
   if (s.isPlayer) { damageFlash(dmg / 40); playSound('hurt'); addShake(0.35); }
   else if (dist2D(s.mesh.position, camera.position) < 25) playSound('hurt');
-  if (s.hp <= 0) { s.hp = 0; s.alive = false; s.mesh.rotation.x = -Math.PI / 2; s.mesh.position.y = 0.3; spawnBlood(s.mesh.position, true); log('☠ ' + s.name + ' cayó'); killfeed('☠ ' + s.name + ' cayó'); checkGameOver(); }
+  // Warzone: derribo antes de muerte → reanimable con F (aliado o jugador)
+  if (s.hp <= 0 && !s.downed) {
+    s.downed = true; s.hp = 25; s.reviveT = 30;
+    try { s.mesh.rotation.x = -Math.PI / 2.4; s.mesh.position.y = 0.35; } catch (e) {}
+    setThought(s, '¡DERIBADO! ¡Reanímame [F]!');
+    log('🩸 ' + s.name + ' DERIBADO — reanima con F'); killfeed('🩸 ' + s.name + ' derribado');
+    bossBanner('🩸 ' + s.name.toUpperCase() + ' DERIBADO', 0.5);
+    playSound('alarm');
+    checkGameOver();
+  }
+}
+function reviveSurvivor(s) {
+  s.downed = false; s.hp = 60; s.reviveT = 0;
+  try { s.mesh.rotation.x = 0; s.mesh.position.y = 0; } catch (e) {}
+  spawnHealFX(s.mesh.position); playSound('heal');
+  log('🚑 ' + s.name + ' reanimado'); killfeed('🚑 ' + s.name + ' reanimado');
 }
 function damageShelter(zone, dmg) {
   if (!zone.depot) return;

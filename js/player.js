@@ -24,7 +24,12 @@ function menuStartGame() {
   gameStarted = true; gameSpeed = 1;
   startWaveTimer();
   if (gameMode === 'participant' && playerIndex < 0) spawnPlayerSurvivor();
-  if (gameMode === 'participant') { attachViewmodel(); setTimeout(lockPointer, 300); toast('Click en el mundo para capturar ratón · V cámara'); }
+  if (gameMode === 'participant') {
+    // FIX cámara fija: el jugador SIEMPRE entra en follow propio, no en orbit
+    cameraMode = 'follow';
+    cameraTargets.followIdx = playerIndex;
+    attachViewmodel(); setTimeout(lockPointer, 300); toast('Click en el mundo para capturar ratón · V cámara');
+  }
   else toast('Modo espectador: la IA juega sola');
   log('▶ Partida iniciada (' + gameMode + ' / ' + viewMode + ' / ' + uiMode + ')');
 }
@@ -160,8 +165,9 @@ function updatePlayer(dt) {
   // hambre: sin comida no hay sprint ni regen (propósito comida)
   p.hunger = p.hunger === undefined ? 100 : p.hunger;
   if (l > 0) {
-    p.mesh.position.x += vx / l * sp * dt * gameSpeed;
-    p.mesh.position.z += vz / l * sp * dt * gameSpeed;
+    var stepX = vx / l * sp * dt * gameSpeed, stepZ = vz / l * sp * dt * gameSpeed;
+    if (typeof tryMoveGround === 'function') tryMoveGround(p.mesh.position, stepX, stepZ, 0.45);
+    else { p.mesh.position.x += stepX; p.mesh.position.z += stepZ; }
     p.mesh.rotation.y = p.yaw + Math.PI;
     // agachado: modelo más bajo
     var targetH = crouching || p.sliding > 0 ? 0.72 : 1;

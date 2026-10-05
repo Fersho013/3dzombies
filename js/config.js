@@ -32,6 +32,7 @@ var WEAPONS = {
   shotgun: { name:'Escopeta 725',      dmg:[22,6],  range:14, falloff:[7,14],  cd:0.95, mag:6,  reload:2.4, recoil:0.07,  spreadHip:0.06,  spreadAds:0.035, adsTime:0.26, adsFov:50, mobility:0.96, color:0xf59e0b, len:0.65, pellets:7 },
   sniper:  { name:'HDR Precisión',     dmg:[120,85],range:60, falloff:[30,60], cd:1.5,  mag:5,  reload:2.8, recoil:0.09,  spreadHip:0.09,  spreadAds:0.001, adsTime:0.42, adsFov:22, mobility:0.88, scope:true, color:0x38bdf8, len:0.9 },
   smg:     { name:'Subfusil MP5',      dmg:[26,14], range:24, falloff:[12,24], cd:0.085, mag:32, reload:1.7, recoil:0.014, spreadHip:0.038, spreadAds:0.009, adsTime:0.2,  adsFov:46, mobility:1.02, color:0xec4899, len:0.5 },
+  raygun:  { name:'Raygun MK-II ⚡',     dmg:[90,70], range:30, falloff:[10,30], cd:0.22, mag:20, reload:2.0, recoil:0.02, spreadHip:0.02, spreadAds:0.004, adsTime:0.22, adsFov:40, mobility:0.98, color:0x4ade80, len:0.55, wonder:true },
   knife:   { name:'Cuchillo táctico',  dmg:[55,55], range:2.4, falloff:[0,2.4],cd:0.5,  mag:Infinity, reload:0, recoil:0,  spreadHip:0, spreadAds:0, adsTime:0.15, adsFov:62, mobility:1.1, color:0xe2e8f0, len:0.3, melee:true }
 };
 // PROPÓSITO de cada caja/recurso (temática supervivencia):

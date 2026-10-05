@@ -225,6 +225,64 @@ function insideInterior(pos) {
   for (var i = 0; i < interiors.length; i++) { var it = interiors[i]; if (Math.abs(pos.x - it.x) < it.w / 2 && Math.abs(pos.z - it.z) < it.d / 2) return it; }
   return null;
 }
+// ===== MEMORIA entrar/salir + buscar puerta rodeando (CoD) =====
+function doorsForInterior(it) {
+  var out = [], R = Math.max(it.w, it.d) * 0.5 + 4;
+  for (var i = 0; i < doors.length; i++) {
+    var d = doors[i];
+    if (Math.abs(d.mesh.position.x - it.x) < R && Math.abs(d.mesh.position.z - it.z) < R) out.push(d);
+  }
+  return out;
+}
+function nearestDoorOf(it, fromPos) {
+  var ds = doorsForInterior(it), best = null, bd = 1e9;
+  for (var i = 0; i < ds.length; i++) { var d = dist2D(fromPos, ds[i].mesh.position); if (d < bd) { bd = d; best = ds[i]; } }
+  return best;
+}
+// registra entrar/salir para que el NPC sepa si está dentro y busque la salida
+function updateInsideMemory(s) {
+  var cur = (typeof insideInterior === 'function') ? insideInterior(s.mesh.position) : null;
+  var label = cur ? cur.label : null;
+  if ((s._inside || null) !== label) {
+    if (label && !s.isPlayer) { setThought(s, '🏠 dentro: ' + label); }
+    if (!label && s._inside && !s.isPlayer) { setThought(s, '🚪 fuera'); log('🚪 ' + s.name + ' salió de ' + s._inside); }
+    if (label && s._inside !== label && !s.isPlayer) log('🏠 ' + s.name + ' entró en ' + label);
+    s._inside = label;
+    s._insideRef = cur;
+  }
+  return cur;
+}
+// Navega a objetivo pasando por puerta: si objetivo dentro y yo fuera (o al revés),
+// rodea hasta la puerta, la abre y cruza. Devuelve 'door' si está en fase puerta, true si llegó.
+function navigateWithDoors(s, target, dt, stopD, mul) {
+  updateInsideMemory(s);
+  var dest = (typeof insideInterior === 'function') ? insideInterior(target) : null;
+  var cur = s._insideRef || ((typeof insideInterior === 'function') ? insideInterior(s.mesh.position) : null);
+  var curLabel = cur ? cur.label : null, destLabel = dest ? dest.label : null;
+  if (curLabel !== destLabel && (cur || dest)) {
+    var it = cur || dest; // si estoy dentro salgo por mi puerta; si voy dentro entro por la suya
+    var door = (cur ? nearestDoorOf(cur, s.mesh.position) : nearestDoorOf(dest, s.mesh.position)) || nearestDoor(s.mesh.position, 30);
+    if (!door) return moveToward(s, target, dt, mul, stopD);
+    var dd = dist2D(s.mesh.position, door.mesh.position);
+    // punto de aproximación: frente de la puerta por fuera
+    if (dd > 2.0) {
+      var r = moveToward(s, door.mesh.position, dt, mul, 1.6);
+      if (dd < 6 && !s.isPlayer && Math.random() < dt * 0.5) setThought(s, '🚪 a ' + door.label);
+      return r === true ? 'door' : r;
+    }
+    if (!door.open) { toggleDoor(door); if (!s.isPlayer) setThought(s, '🚪 abriendo'); }
+    // cruzar: empujar un poco más allá de la puerta hacia el objetivo
+    if (dd <= 2.2) {
+      var dx = target.x - s.mesh.position.x, dz = target.z - s.mesh.position.z;
+      var l = Math.sqrt(dx * dx + dz * dz) || 1;
+      var px = s.mesh.position.x + door.mesh.position.x * 0 + (door.mesh.position.x - s.mesh.position.x) * 0.4 + dx / l * 1.2;
+      var pz = s.mesh.position.z + (door.mesh.position.z - s.mesh.position.z) * 0.4 + dz / l * 1.2;
+      return moveToward(s, { x: px, z: pz }, dt, mul);
+    }
+    return 'door';
+  }
+  return moveToward(s, target, dt, mul, stopD);
+}
 function buildZonePark() {
   var p = ZONES.PARK.pos;
   var grass = new THREE.Mesh(new THREE.CircleGeometry(26, 24), new THREE.MeshStandardMaterial({ map: TEX.grass, roughness: 1, color: 0x9ca3af }));
@@ -430,4 +488,103 @@ function spawnCrate(pos, kind) {
   // nunca dentro de un muro: empujar fuera para que sea alcanzable por la puerta
   if (typeof resolveCircle === 'function') resolveCircle(g.position, 0.8);
   crates.push({ mesh: g, pos: g.position, kind: kind, taken: false, bob: Math.random() * 6 });
+}
+// ===== SISTEMA CoD ZOMBIES: puntos + caja misteriosa 950 + armas de pared =====
+var mysteryBoxes = [], wallbuys = [];
+var BOX_COST = 950;
+var WALLBUYS_DEF = [
+  { weapon: 'shotgun', cost: 750, label: '725 pared 750' },
+  { weapon: 'sniper', cost: 1250, label: 'HDR pared 1250' },
+  { weapon: 'smg', cost: 1000, label: 'MP5 pared 1000' }
+];
+function givePoints(s, n, why) {
+  if (!s) return;
+  var mult = (typeof powerTimers !== 'undefined' && powerTimers.doublePts > 0) ? 2 : 1;
+  s.points = (s.points || 0) + n * mult;
+  if (s.isPlayer && (n >= 60 || why)) toast('⭐ +' + (n * mult) + (why ? ' ' + why : ''));
+}
+function buildMysteryBox(x, z, label) {
+  var g = new THREE.Group();
+  var chest = new THREE.Mesh(new THREE.BoxGeometry(1.8, 1, 1.1), new THREE.MeshStandardMaterial({ color: 0x1e3a8a, roughness: 0.4 }));
+  chest.position.y = 0.5; chest.castShadow = true; g.add(chest);
+  var lid = new THREE.Mesh(new THREE.BoxGeometry(1.8, 0.25, 1.1), new THREE.MeshStandardMaterial({ color: 0x3b82f6 }));
+  lid.position.y = 1.05; g.add(lid);
+  var q = new THREE.Mesh(new THREE.BoxGeometry(0.5, 0.5, 0.12), new THREE.MeshBasicMaterial({ color: 0xfacc15 }));
+  q.position.set(0, 0.55, 0.58); g.add(q);
+  var halo = new THREE.Mesh(new THREE.CylinderGeometry(1.2, 1.2, 0.1, 16), new THREE.MeshBasicMaterial({ color: 0x60a5fa, transparent: true, opacity: 0.35 }));
+  halo.position.y = 0.06; g.add(halo);
+  g.position.set(x, 0, z); scene.add(g);
+  if (typeof resolveCircle === 'function') resolveCircle(g.position, 1.2);
+  var b = { mesh: g, lid: lid, x: g.position.x, z: g.position.z, label: label, cost: BOX_COST };
+  mysteryBoxes.push(b);
+  addDynamicSolid(b, g.position.x, g.position.z, 2, 1.3);
+  return b;
+}
+function buildWallbuy(x, z, ry, def) {
+  var g = new THREE.Group();
+  var board = new THREE.Mesh(new THREE.BoxGeometry(2.2, 1.2, 0.12), new THREE.MeshStandardMaterial({ color: 0x111827 }));
+  board.position.y = 1.5; g.add(board);
+  var gun = createWeaponMesh(def.weapon);
+  gun.position.set(0, 1.5, 0.15); gun.rotation.z = 0.3; g.add(gun);
+  var tag = new THREE.Mesh(new THREE.BoxGeometry(1.6, 0.3, 0.05), new THREE.MeshBasicMaterial({ color: 0x10b981 }));
+  tag.position.set(0, 0.75, 0.1); g.add(tag);
+  g.position.set(x, 0, z); g.rotation.y = ry || 0; scene.add(g);
+  var w = { mesh: g, x: g.position.x, z: g.position.z, def: def, label: def.label };
+  wallbuys.push(w);
+  return w;
+}
+function buildCodEconomy() {
+  // caja misteriosa dentro del MALL (hay que entrar por puerta) + una en HOUSES
+  buildMysteryBox(-6, -18, 'Caja MALL 950');
+  buildMysteryBox(-62, 32, 'Caja HOUSES 950');
+  // armas de pared: una por casa/MALL para forzar exploración
+  buildWallbuy(5.5, -10, Math.PI / 2, WALLBUYS_DEF[0]);
+  buildWallbuy(-58, 24, 0, WALLBUYS_DEF[2]);
+  buildWallbuy(-66, 30, 0, WALLBUYS_DEF[1]);
+}
+function nearestBox(pos, maxD) {
+  var best = null, bd = maxD || 3;
+  for (var i = 0; i < mysteryBoxes.length; i++) { var d = dist2D(pos, { x: mysteryBoxes[i].x, z: mysteryBoxes[i].z }); if (d < bd) { bd = d; best = mysteryBoxes[i]; } }
+  return best;
+}
+function nearestWallbuy(pos, maxD) {
+  var best = null, bd = maxD || 3;
+  for (var i = 0; i < wallbuys.length; i++) { var d = dist2D(pos, { x: wallbuys[i].x, z: wallbuys[i].z }); if (d < bd) { bd = d; best = wallbuys[i]; } }
+  return best;
+}
+function giveWeaponTo(s, wk) {
+  s.slots = s.slots || [s.weaponKey, 'pistol'];
+  if (s.slots.indexOf(wk) < 0) { if (s.slots.length < 3) s.slots.push(wk); else s.slots[1] = wk; }
+  s.weaponKey = wk;
+  var w = WEAPONS[wk];
+  s.mag = w.mag; s.ammo = w.mag; s.magByWeapon = s.magByWeapon || {}; s.magByWeapon[wk] = w.mag;
+  if (s.gunMesh) { try { s.mesh.remove(s.gunMesh); } catch (e) {} }
+  s.gunMesh = createWeaponMesh(wk); s.gunMesh.position.set(0.36, 1.35, 0.45); s.mesh.add(s.gunMesh);
+  if (s.isPlayer && typeof attachViewmodel === 'function') attachViewmodel();
+}
+function tryMysteryBox(p) {
+  var b = nearestBox(p.mesh.position, 3);
+  if (!b) return false;
+  p.points = p.points || 0;
+  if (p.points < b.cost) { toast('📦 Caja ' + b.cost + ' pts — tienes ' + p.points + ' (mata zombies)'); playSound('ui'); return true; }
+  p.points -= b.cost;
+  var pool = ['rifle', 'smg', 'shotgun', 'sniper', 'raygun', 'rifle', 'smg'];
+  var wk = pool[Math.floor(Math.random() * pool.length)];
+  // animación tapa
+  try { b.lid.position.y = 1.6; setTimeout(function () { b.lid.position.y = 1.05; }, 600); } catch (e) {}
+  giveWeaponTo(p, wk);
+  playSound('pickup'); toast('📦 ¡' + WEAPONS[wk].name + '! (-950)');
+  log('📦 ' + p.name + ' sacó ' + WEAPONS[wk].name);
+  return true;
+}
+function tryWallbuy(p) {
+  var w = nearestWallbuy(p.mesh.position, 3);
+  if (!w) return false;
+  p.points = p.points || 0;
+  if (p.points < w.def.cost) { toast('🔫 ' + w.def.label + ' — tienes ' + p.points); return true; }
+  p.points -= w.def.cost;
+  giveWeaponTo(p, w.def.weapon);
+  baseResources.ammo += 20;
+  playSound('pickup'); toast('🔫 ¡' + WEAPONS[w.def.weapon].name + '! (-' + w.def.cost + ')');
+  return true;
 }

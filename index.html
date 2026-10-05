@@ -20,6 +20,7 @@
 <div id="interact-prompt" class="hidden">E</div>
 <canvas id="minimap" width="150" height="150"></canvas>
 <div id="wave-progress"><i id="wave-fill"></i></div>
+<div id="compass"><div id="compass-strip"></div><div id="compass-needle">▲</div></div>
 
 <!-- HEADER -->
 <header id="hud-header" class="glass fixed top-0 left-0 right-0 z-40 hidden px-3 py-2 flex items-center justify-between gap-2">
@@ -116,15 +117,27 @@
   <div class="p-2"><button id="btn-close-design" class="hud-btn w-full">Cerrar</button></div>
 </div>
 
-<!-- TOUCH -->
+<!-- TOUCH estilo COD Mobile: joystick izq + doble botón fuego der (cadera/ADS) + salto/agacharse/deslizar -->
 <div id="touch-ui" class="hidden">
-  <div id="joystick"><div id="stick"></div></div>
-  <div id="touch-btns">
-    <button data-t="fire">🔥</button><button data-t="ads">🎯</button><button data-t="nade">💣</button>
-    <button data-t="use">E</button><button data-t="build">B</button><button data-t="heal">F</button>
-    <button data-t="tower">🗼</button><button data-t="hammer">X</button><button data-t="inv">🎒</button>
-    <button data-t="rally">T</button>
+  <div id="joystick"><div id="stick"></div><div id="sprint-zone">SPRINT</div></div>
+  <div id="touch-btns-codm">
+    <button data-t="hipfire" class="codm-fire hip" title="Fuego cadera">🔥<em>HIP</em></button>
+    <button data-t="adsfire" class="codm-fire ads" title="Apuntar + fuego">🎯<em>ADS</em></button>
+    <button data-t="ads" class="codm-mini" title="ADS toggle">🔭</button>
+    <button data-t="jump" class="codm-mini" title="Salto">⬆</button>
+    <button data-t="crouch" class="codm-mini" title="Agacharse/Slide">⬇</button>
+    <button data-t="reload" class="codm-mini" title="Recarga">🔄</button>
+    <button data-t="nade" class="codm-mini" title="Letal">💣</button>
+    <button data-t="heal" class="codm-mini" title="Curar">💊</button>
+    <button data-t="knife" class="codm-mini" title="Cuchillo">🔪</button>
+    <button data-t="use" class="codm-big" title="Interactuar">E</button>
+    <button data-t="swap" class="codm-mini" title="Arma">🔫</button>
+    <button data-t="armor" class="codm-mini" title="Placa">🛡</button>
+    <button data-t="eat" class="codm-mini" title="Comer">🍖</button>
+    <button data-t="build" class="codm-mini" title="Build">B</button>
+    <button data-t="tower" class="codm-mini" title="Torre">🗼</button>
   </div>
+  <div id="look-area"></div>
 </div>
 
 <!-- MAIN MENU -->
@@ -142,7 +155,7 @@
       <div><div class="panel-title">Recursos</div><div class="flex gap-1 p-2"><button class="cbtn hud-btn flex-1" data-k="startRes" data-v="0">0</button><button class="cbtn hud-btn flex-1 font-bold" data-k="startRes" data-v="2">2</button><button class="cbtn hud-btn flex-1" data-k="startRes" data-v="6">6</button></div></div>
       <div><div class="panel-title">Preparación</div><div class="flex gap-1 p-2"><button class="cbtn hud-btn flex-1" data-k="prepTime" data-v="60">1:00</button><button class="cbtn hud-btn flex-1 font-bold" data-k="prepTime" data-v="180">3:00</button><button class="cbtn hud-btn flex-1" data-k="prepTime" data-v="300">5:00</button></div></div>
     </div>
-    <div class="text-[11px] opacity-70 mt-2 text-left">WASD moverse · Shift sprint · Click disparar · ClickD apuntar (ADS) · Q granada · F curar · E recoger · B construir · G armas · I inventario · O diseñador · T reagrupar · X martillo · Z torre · V cámara</div>
+    <div class="text-[11px] opacity-70 mt-2 text-left">PC Warzone: WASD · Shift sprint · Espacio salto · C agacharse (sprint+C slide) · Click fuego · ClickD ADS · R recarga · E interactuar/puertas · Q letal · F curar/reanimar · 1/2 armas · 4 placa · 5 comer · H cuchillo · Tab inventario · B/O/T/X/Z/V · Mando: LT ADS RT fuego A salto B agacharse X usar Y armas LB letal RB curar | Móvil CODM: joystick (borde=sprint) + HIP/ADS fuego + E contextual</div>
     <button id="btn-play" class="mt-3 text-lg font-extrabold px-10 py-3 rounded-xl bg-emerald-500 hover:bg-emerald-400 text-black tracking-widest"><i class="fa-solid fa-play"></i> JUGAR</button>
   </div>
 </div>
